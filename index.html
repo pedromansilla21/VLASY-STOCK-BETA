@@ -1724,17 +1724,22 @@
           <div id="bp-vencidos" style="font-size:28px; font-weight:700; color:var(--c-red);">—</div>
         </div>
       </div>
-
       <!-- Buscador -->
       <div class="card" style="padding:14px 16px; margin-bottom:14px;">
         <div style="display:flex; gap:10px; align-items:center;">
           <i class="ti ti-search" style="color:var(--c-text3); font-size:18px;"></i>
-          <input id="bp-search" type="text" placeholder="Buscar por código, descripción o palet…"
+          <input id="bp-search" type="text" placeholder="Buscar por código o descripción…"
             style="flex:1; background:transparent; border:none; outline:none; font-size:14px; color:var(--c-text1);"
             oninput="bpFiltrar()" />
         </div>
       </div>
 
+      <!-- Filtro de marcas -->
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
+        <span style="font-size:12px; color:var(--c-text3);">Filtrar por marca:</span>
+        <div id="bp-filtros-marca" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+      </div>
+     
       <!-- Tabla resultados -->
       <div class="card" style="padding:0; overflow:hidden;">
         <div class="table-wrap">
@@ -2508,6 +2513,7 @@ function scFiltrar() {
 // ── BUSCADOR DE PALETS ────────────────────────────────────────
 var _bpDatos = [];
 var _bpCargado = false;
+var _bpMarcaActiva = '';
 
 function bpRefresh() {
   _bpCargado = false;
@@ -2564,6 +2570,7 @@ async function bpLoad() {
       });
 
     _bpCargado = true;
+    bpRenderizarFiltrosMarca();
     bpRenderizar(_bpDatos);
     bpActualizarContadores(_bpDatos);
   } catch(e) {
@@ -2609,26 +2616,45 @@ function bpActualizarContadores(datos) {
   var totalItems   = datos.length;
   var totalUnd     = datos.reduce(function(s, d){ return s + d.cant; }, 0);
   var paletsUnicos = new Set(datos.map(function(d){ return d.palet; })).size;
-  var enTermino    = datos.filter(function(d){ return !d.vencida; }).length;
-  var vencidos     = datos.filter(function(d){ return d.vencida; }).length;
+  // En término y Vencidos ahora se muestran en UNIDADES (antes contaban artículos)
+  var undEnTermino = datos.filter(function(d){ return !d.vencida; }).reduce(function(s, d){ return s + d.cant; }, 0);
+  var undVencidas  = datos.filter(function(d){ return d.vencida; }).reduce(function(s, d){ return s + d.cant; }, 0);
   var set = function(id, v){ var el = document.getElementById(id); if(el) el.textContent = v.toLocaleString('es-AR'); };
   set('bp-total',    totalItems);
   set('bp-unidades', totalUnd);
   set('bp-palets',   paletsUnicos);
-  set('bp-ok',       enTermino);
-  set('bp-vencidos', vencidos);
+  set('bp-ok',       undEnTermino);
+  set('bp-vencidos', undVencidas);
+}
+
+function bpRenderizarFiltrosMarca() {
+  var marcas = {};
+  _bpDatos.forEach(function(d) { if (d.marca) marcas[d.marca] = true; });
+  var container = document.getElementById('bp-filtros-marca');
+  if (!container) return;
+  var html = '<button class="btn btn-sm' + (!_bpMarcaActiva ? ' btn-primary' : '') + '" onclick="bpFiltrarMarca(\'\')">Todas</button>';
+  Object.keys(marcas).sort().forEach(function(m) {
+    html += '<button class="btn btn-sm' + (_bpMarcaActiva === m ? ' btn-primary' : '') + '" onclick="bpFiltrarMarca(\'' + escHtml(m) + '\')">' + escHtml(m) + '</button>';
+  });
+  container.innerHTML = html;
+}
+
+function bpFiltrarMarca(marca) {
+  _bpMarcaActiva = marca;
+  bpRenderizarFiltrosMarca();
+  bpFiltrar();
 }
 
 function bpFiltrar() {
   var q = (document.getElementById('bp-search').value || '').toLowerCase().trim();
   var filtrados = _bpDatos.filter(function(d) {
-    return !q ||
-      d.cod.toLowerCase().indexOf(q)    !== -1 ||
-      d.desc.toLowerCase().indexOf(q)   !== -1 ||
-      d.palet.toLowerCase().indexOf(q)  !== -1 ||
-      d.ubi.toLowerCase().indexOf(q)    !== -1 ||
-      d.lote.toLowerCase().indexOf(q)   !== -1 ||
-      d.marca.toLowerCase().indexOf(q)  !== -1;
+    // Búsqueda limitada a código y descripción — antes también miraba
+    // palet/ubicación/lote/marca, y eso traía coincidencias sin relación
+    var coincideTexto = !q ||
+      d.cod.toLowerCase().indexOf(q)  !== -1 ||
+      d.desc.toLowerCase().indexOf(q) !== -1;
+    var coincideMarca = !_bpMarcaActiva || d.marca === _bpMarcaActiva;
+    return coincideTexto && coincideMarca;
   });
   bpRenderizar(filtrados);
   bpActualizarContadores(filtrados);
