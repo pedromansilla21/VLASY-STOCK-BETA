@@ -2531,7 +2531,7 @@ async function bpLoad() {
   if (tbody)     tbody.innerHTML = '';
 
   try {
-    var url = GAS_URL + '?accion=leerRango&rango=' + encodeURIComponent("'HISTORIAL DE PALETS'!A:O");
+    var url = GAS_URL + '?accion=leerRango&rango=' + encodeURIComponent("'HISTORIAL DE PALETS'!A:R");
     var resp = await fetch(url, { cache: 'no-store' });
     var data = await resp.json();
     if (!data.ok || !Array.isArray(data.data)) throw new Error('Sin datos');
@@ -2556,7 +2556,7 @@ async function bpLoad() {
           cod:        String(row[0] || '').trim(),
           desc:       String(row[1] || '').trim(),
           cat:        String(row[2] || '').trim(),
-          marca:      String(row[3] || '').trim(),
+          marca:      String(row[17] || '').trim(),
           cant:       cant,
           un:         String(row[5] || 'UND').trim(),
           fecha:      fechaMostrar,
