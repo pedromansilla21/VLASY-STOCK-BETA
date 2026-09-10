@@ -2552,8 +2552,9 @@ async function bpLoad() {
         var partes  = fechaRaw.split(/[-T]/);
         var anio    = parseInt(partes[0], 10) || 0;
         var mes     = parseInt(partes[1], 10) || 0;
-        var vencida = anio > 0 && (anio < hoy.getFullYear() || (anio === hoy.getFullYear() && mes < (hoy.getMonth() + 1)));
-        var porVencer = !vencida && anio > 0 && (anio === hoy.getFullYear() && mes <= (hoy.getMonth() + 3));
+          var mesesRestantes = anio > 0 ? (anio * 12 + mes) - (hoy.getFullYear() * 12 + (hoy.getMonth() + 1)) : 999;
+          var vencida    = anio > 0 && mesesRestantes < 13;
+          var porVencer  = anio > 0 && mesesRestantes >= 13 && mesesRestantes <= 15;
         var fechaMostrar = (mes && anio) ? String(mes).padStart(2,'0') + '/' + anio : '—';
         return {
           cod:        String(row[0] || '').trim(),
