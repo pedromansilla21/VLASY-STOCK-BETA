@@ -1733,7 +1733,10 @@
             oninput="bpFiltrar()" />
         </div>
       </div>
-
+      <div style="display:flex; align-items:center; gap:6px; margin-bottom:12px; font-size:13px; color:var(--c-text2);">
+        <input type="checkbox" id="bp-ocultar-cero" onchange="bpFiltrar()" style="cursor:pointer;" />
+        <label for="bp-ocultar-cero" style="cursor:pointer;">Ocultar artículos con cantidad 0</label>
+      </div>
       <!-- Filtro de marcas -->
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
         <span style="font-size:12px; color:var(--c-text3);">Filtrar por marca:</span>
@@ -2654,7 +2657,8 @@ function bpFiltrar() {
       d.cod.toLowerCase().indexOf(q)  !== -1 ||
       d.desc.toLowerCase().indexOf(q) !== -1;
     var coincideMarca = !_bpMarcaActiva || d.marca === _bpMarcaActiva;
-    return coincideTexto && coincideMarca;
+    var coincideCero = !document.getElementById('bp-ocultar-cero').checked || d.cant > 0;
+    return coincideTexto && coincideMarca && coincideCero;
   });
   bpRenderizar(filtrados);
   bpActualizarContadores(filtrados);
