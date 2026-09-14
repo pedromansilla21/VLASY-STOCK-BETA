@@ -2321,14 +2321,14 @@ function updateClock() {
 // Limpia OCs fantasma del localStorage que causan doPost innecesarios
 // en cada ciclo de sync. Se ejecuta UNA SOLA VEZ por dispositivo.
 (function() {
-  var FLAG = 'sc_limpieza_v1';
+  var FLAG = 'BETA_sc_limpieza_v1';
   if (localStorage.getItem(FLAG)) return;
   try {
-    var raw = localStorage.getItem('stockcontrol_ordenes');
+    var raw = localStorage.getItem('BETA_stockcontrol_ordenes');
     if (raw) {
       var ordenes = JSON.parse(raw);
       if (Array.isArray(ordenes)) {
-        localStorage.removeItem('stockcontrol_ordenes');
+        localStorage.removeItem('BETA_stockcontrol_ordenes');
         console.log('[AutoLimpieza] localStorage de órdenes limpiado (' + ordenes.length + ' entradas). Se recargará desde el Sheet.');
       }
     }
@@ -4934,7 +4934,7 @@ function borrarArticulo(i) {
 // ══════════════════════════════════════════════
 // REPORTE DE ÓRDENES DE COMPRA
 // ══════════════════════════════════════════════
-var ORDENES_KEY = 'stockcontrol_ordenes';
+var ORDENES_KEY = 'BETA_stockcontrol_ordenes';
 var ocFiltroActual = 'todas';
 
 
@@ -4965,11 +4965,11 @@ function saveOrdenes(ordenes) {
 
 
 // ── SISTEMA OFFLINE / COLA DE SINCRONIZACIÓN ──────────────
-var _offlineQueue = JSON.parse(localStorage.getItem('sc_offline_queue') || '[]');
+var _offlineQueue = JSON.parse(localStorage.getItem('BETA_sc_offline_queue') || '[]');
 var _isOnline = true;
 
 function _saveOfflineQueue() {
-  try { localStorage.setItem('sc_offline_queue', JSON.stringify(_offlineQueue)); } catch(e) {}
+  try { localStorage.setItem('BETA_sc_offline_queue', JSON.stringify(_offlineQueue)); } catch(e) {}
 }
 
 function _addToQueue(accion, payload) {
@@ -5182,21 +5182,21 @@ async function _guardarEnHistorial(oc, escaneadoPor) {
       }
     } else {
       // Guardar en HISTORIAL COMPLETO (normal)
-     try { localStorage.setItem('sc_pending_hist_' + oc.id, JSON.stringify({ fila: fila })); } catch(e) {}
+    try { localStorage.setItem('BETA_sc_pending_hist_' + oc.id, JSON.stringify({ fila: fila })); } catch(e) {}
 fetch(GAS_URL, {
   method: 'POST',
   mode: 'no-cors',
   body: JSON.stringify({ accion: 'guardarHistorial', fila: fila })
 }).then(function() {
-  try { localStorage.removeItem('sc_pending_hist_' + oc.id); } catch(e) {}
+ try { localStorage.removeItem('BETA_sc_pending_hist_' + oc.id); } catch(e) {}
 }).catch(function() {});
 }
   } catch(e) { console.error('Error en _guardarEnHistorial:', e); }
 }
 
 // ── Pendientes de restar (resiliencia ante fallos del GAS) ──────────────────
-var PENDING_RESTARS_KEY = 'stockcontrol_pending_restars';
-var PENDING_FINREP_KEY  = 'stockcontrol_pending_finrep';
+var PENDING_RESTARS_KEY = 'BETA_stockcontrol_pending_restars';
+var PENDING_FINREP_KEY  = 'BETA_stockcontrol_pending_finrep';
 
 function _savePendingFinRep(id, ocId, palet, lineas) {
   try {
@@ -5634,14 +5634,14 @@ async function syncOrdenes() {
     // CUALQUIER dispositivo borra una O.C., todos los demás se enteran en su
     // propio sync (cada 15s) y dejan de incluirla en sus reescrituras — no
     // hace falta borrarla a mano en cada tablet/PC para que no se resucite.
-    var eliminados = JSON.parse(localStorage.getItem('oc_eliminadas') || '[]');
+    var eliminados = JSON.parse(localStorage.getItem('BETA_oc_eliminadas') || '[]');
     try {
       var filasElim = await sheetsRead('ORDENES!D2:D5000');
       filasElim.forEach(function(f){
         if (f && f[0] && eliminados.indexOf(f[0]) < 0) eliminados.push(f[0]);
       });
     } catch(eElim) {}
-    try { localStorage.setItem('oc_eliminadas', JSON.stringify(eliminados)); } catch(e) {}
+    try { localStorage.setItem('BETA_oc_eliminadas', JSON.stringify(eliminados)); } catch(e) {}
 
     // Merge: combinar Sheets + local, sin perder OC de ninguno
     // Excluir OC eliminadas intencionalmente
@@ -7074,9 +7074,9 @@ function _ejecutarEnvioEscaneo(ocId, filaAlerta) {
 function eliminarOC(ocId) {
   if (!confirm('¿Eliminar esta O.C. del historial? Esta acción no se puede deshacer.')) return;
   // Guardar ID como eliminado para que el sync no lo restaure en ESTE dispositivo
-  var eliminados = JSON.parse(localStorage.getItem('oc_eliminadas') || '[]');
+  var eliminados = JSON.parse(localStorage.getItem('BETA_oc_eliminadas') || '[]');
   if (eliminados.indexOf(ocId) < 0) eliminados.push(ocId);
-  localStorage.setItem('oc_eliminadas', JSON.stringify(eliminados));
+  localStorage.setItem('BETA_oc_eliminadas', JSON.stringify(eliminados));
   var ordenes = loadOrdenes().filter(function(o){ return o.id !== ocId; });
   saveOrdenes(ordenes);
   updateBadgeOrdenes();
@@ -8144,7 +8144,7 @@ async function syncUsuarios() {
           var pickingBeta = String(r[5] || '').trim().toUpperCase() === 'SI';
           return { name: nombre, rol: rol, pin: pin, filaAlerta: filaAlerta, sesionActiva: sesionActiva, pickingBeta: pickingBeta };
         });
-      try { localStorage.setItem('stockcontrol_users', JSON.stringify(users)); } catch(e) {}
+      try { localStorage.setItem('BETA_stockcontrol_users', JSON.stringify(users)); } catch(e) {}
       return users;
     }
   } catch(e) {}
@@ -8214,7 +8214,7 @@ function _getFilaUsuario(nombreUsuario) {
   return idx >= 0 ? idx + 2 : null;
 }
 
-var USERS_KEY    = 'stockcontrol_users';
+var USERS_KEY    = 'BETA_stockcontrol_users';
 var CURRENT_USER = null; // { name, color, initials }
 
 var USER_COLORS = ['#2563EB','#16A34A','#DC2626','#9333EA','#EA580C','#0891B2','#65A30D','#DB2777'];
@@ -9198,7 +9198,7 @@ function _generarNroOC() {
   // Toma el máximo número de OC existente y suma 1
   var ocs = [];
   try {
-    var raw = localStorage.getItem('stockcontrol_ordenes');
+    var raw = localStorage.getItem('BETA_stockcontrol_ordenes');
     ocs = raw ? JSON.parse(raw) : [];
   } catch(e) { ocs = []; }
 
