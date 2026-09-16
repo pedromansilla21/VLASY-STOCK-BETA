@@ -6179,7 +6179,8 @@ function renderOrdenes() {
 }
 
 function renderItemsFueraOCReporte(oc) {
-  if (!oc.itemsFueraOC || oc.itemsFueraOC.length === 0) return '';
+  var itemsConStockRep = (oc.itemsFueraOC || []).filter(function(x){ return (x.unidadesTotal||0) > 0; });
+  if (itemsConStockRep.length === 0) return '';
   var puedeAgregar = oc.estadoManual === 'finalizado';
   var totalCant = oc.itemsFueraOC.reduce(function(s,x){ return s + (x.unidadesTotal||0); }, 0);
   var titulo = puedeAgregar ? 'Productos fuera de esta O.C. — pendientes de confirmar' : 'Productos fuera de esta O.C.';
@@ -6189,6 +6190,7 @@ function renderItemsFueraOCReporte(oc) {
     '</div>' +
     '<div style="display:flex; flex-direction:column; gap:3px;">';
   oc.itemsFueraOC.forEach(function(x, idx) {
+    if ((x.unidadesTotal||0) <= 0) return;
     var tieneDivisiones = x.divisiones && x.divisiones.length > 0;
     html += '<div style="background:var(--c-surface); border-radius:4px; padding:6px 10px; font-size:11px; margin-bottom:3px;">' +
       '<div style="display:flex; align-items:center; gap:8px;">' +
