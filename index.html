@@ -3569,10 +3569,7 @@ function abrirPanelCompletarControl() {
               '</td>' +
               '<td><input type="text" id="cc-fuera-lote-' + j + '" value="' + escHtml(x.lote || '') + '" placeholder="Ej: L-2024" /></td>' +
               '<td><input type="text" id="cc-fuera-palet-' + j + '" value="' + escHtml(x.palet || '') + '" placeholder="Ej: P-01" /></td>' +
-            '<td style="text-align:center; white-space:nowrap;"><div style="display:flex; gap:4px; justify-content:center; flex-wrap:wrap;">' +
-              '<button type="button" class="btn btn-sm btn-restar" title="Dar de baja unidades (corrección por escaneo de más)" onclick="restarUnidadesFueraOC(' + j + ')" style="background:rgba(251,191,36,0.08); border:1.5px solid var(--c-amber); color:var(--c-amber); display:flex; align-items:center; gap:5px; font-size:11px; font-weight:600; padding:4px 10px; white-space:nowrap;"><i class="ti ti-minus" style="font-size:13px;"></i> Bajas</button>' +
-              '<button type="button" class="btn btn-sm" onclick="toggleDividirFuera(' + j + ')" style="font-size:11px; padding:4px 8px;"><i class="ti ti-git-branch"></i> Dividir</button>' +
-            '</div></td>' +
+              '<td style="text-align:center;"><button type="button" class="btn btn-sm" onclick="toggleDividirFuera(' + j + ')" style="font-size:11px; padding:4px 8px;"><i class="ti ti-git-branch"></i> Dividir</button></td>' +
             '</tr>';
         } else {
           // Encabezado dividido
@@ -3703,7 +3700,7 @@ function toggleDividirFuera(j) {
   }];
   abrirPanelCompletarControl();
 }
- function restarUnidadesFueraOC(j) {
+ function restarUnidadesFueraOC(j, soloRefrescarLista) {
   _commitCompletarControlValues();
   var x = itemsFueraOC[j];
   if (!x) return;
@@ -3740,7 +3737,7 @@ function toggleDividirFuera(j) {
     hora: hora, correccion: true, cantidad: -cant, fueraOC: true
   });
 
-  abrirPanelCompletarControl();
+   if (soloRefrescarLista) { renderItemsFueraOC(); } else { abrirPanelCompletarControl(); }
   showToast('Corrección aplicada: −' + cant + ' u. en ' + x.desc + ' (fuera de OC)');
   triggerAutosave();
 }
@@ -4437,7 +4434,7 @@ function renderItemsFueraOC() {
   var totalCant = itemsFueraOC.reduce(function(s,x){ return s + (x.unidadesTotal||0); }, 0);
   count.textContent = totalCant + ' u.';
   list.innerHTML = '';
-  itemsFueraOC.forEach(function(x) {
+    itemsFueraOC.forEach(function(x, j) {
     var detalle = x.cajasEscaneadas > 0
       ? x.cajasEscaneadas + ' caja' + (x.cajasEscaneadas !== 1 ? 's' : '') + (x.unidadesSueltas > 0 ? ' +' + x.unidadesSueltas + 'u.s.' : '')
       : x.unidadesSueltas + ' u. sueltas';
@@ -4447,7 +4444,8 @@ function renderItemsFueraOC() {
       '<span class="mono" style="color:var(--c-text3); min-width:80px;">' + escHtml(x.cod) + '</span>' +
       '<span style="flex:1; color:var(--c-text);">' + escHtml(x.desc) + '</span>' +
       '<span style="color:var(--c-text3); font-size:11px; white-space:nowrap;">' + detalle + '</span>' +
-      '<span style="color:var(--c-amber); font-weight:700; white-space:nowrap;">' + x.unidadesTotal + ' u.</span>';
+           '<span style="color:var(--c-amber); font-weight:700; white-space:nowrap;">' + x.unidadesTotal + ' u.</span>' +
+        '<button type="button" class="btn btn-sm btn-restar" title="Dar de baja unidades (corrección por escaneo de más)" onclick="restarUnidadesFueraOC(' + j + ', true)" style="background:rgba(251,191,36,0.08); border:1.5px solid var(--c-amber); color:var(--c-amber); display:flex; align-items:center; gap:5px; font-size:11px; font-weight:600; padding:4px 8px; white-space:nowrap; margin-left:8px;"><i class="ti ti-minus" style="font-size:12px;"></i> Bajas</button>';
     list.appendChild(row);
   });
 }
