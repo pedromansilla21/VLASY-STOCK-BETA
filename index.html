@@ -4430,12 +4430,14 @@ function renderItemsFueraOC() {
   var list  = document.getElementById('fuera-oc-list');
   var count = document.getElementById('fuera-oc-count');
   if (!card) return;
-  if (!itemsFueraOC || itemsFueraOC.length === 0) { card.style.display = 'none'; return; }
+    var itemsConStock = (itemsFueraOC || []).filter(function(x){ return (x.unidadesTotal||0) > 0; });
+  if (itemsConStock.length === 0) { card.style.display = 'none'; return; }
   card.style.display = 'block';
-  var totalCant = itemsFueraOC.reduce(function(s,x){ return s + (x.unidadesTotal||0); }, 0);
+  var totalCant = itemsConStock.reduce(function(s,x){ return s + (x.unidadesTotal||0); }, 0);
   count.textContent = totalCant + ' u.';
   list.innerHTML = '';
-    itemsFueraOC.forEach(function(x, j) {
+  itemsFueraOC.forEach(function(x, j) {
+    if ((x.unidadesTotal||0) <= 0) return;
     var detalle = x.cajasEscaneadas > 0
       ? x.cajasEscaneadas + ' caja' + (x.cajasEscaneadas !== 1 ? 's' : '') + (x.unidadesSueltas > 0 ? ' +' + x.unidadesSueltas + 'u.s.' : '')
       : x.unidadesSueltas + ' u. sueltas';
