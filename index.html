@@ -7080,9 +7080,11 @@ function _ejecutarEnvioEscaneo(ocId, filaAlerta) {
     ubicacion: oc.ubicacion || '—',
     fechaInicioEscaneo: new Date().toLocaleDateString('es-AR', {day:'2-digit', month:'2-digit', year:'numeric'})
   };
-  remito        = JSON.parse(JSON.stringify(oc.lineas));
+   remito        = JSON.parse(JSON.stringify(oc.lineas));
   registro      = JSON.parse(JSON.stringify(oc.registro || []));
   itemsFueraOC  = JSON.parse(JSON.stringify(oc.itemsFueraOC || []));
+  var elAlertScan = document.getElementById('alert-scan');
+  if (elAlertScan) { elAlertScan.innerHTML = ''; elAlertScan.className = 'alert'; }
 
   document.getElementById('rem-nro').value        = oc.nro !== '\u2014' ? oc.nro : '';
   document.getElementById('rem-proveedor').value  = oc.proveedor !== '\u2014' ? oc.proveedor : '';
