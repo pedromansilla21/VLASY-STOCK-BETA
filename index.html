@@ -3543,13 +3543,14 @@ function abrirPanelCompletarControl() {
   var fueraContainer = document.getElementById('tabla-completar-fuera-oc');
   if (fueraContainer) {
     var itemsFueraVisibles = (itemsFueraOC || []).filter(function(x){
-      return !_filtroCodCompletarControl || String(x.cod).trim() === _filtroCodCompletarControl;
+    return (x.unidadesTotal||0) > 0 && (!_filtroCodCompletarControl || String(x.cod).trim() === _filtroCodCompletarControl);
     });
     if (!itemsFueraOC || itemsFueraOC.length === 0 || itemsFueraVisibles.length === 0) {
       fueraContainer.innerHTML = '';
     } else {
       var tbodyFuera = '';
       itemsFueraOC.forEach(function(x, j) {
+               if ((x.unidadesTotal||0) <= 0) return;
         if (_filtroCodCompletarControl && String(x.cod).trim() !== _filtroCodCompletarControl) return;
         var divididoFuera = x.divisiones && x.divisiones.length > 0;
         if (!divididoFuera) {
