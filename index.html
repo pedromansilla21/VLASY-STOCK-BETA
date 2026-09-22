@@ -1829,7 +1829,42 @@
 
   </main>
 </div>
-
+<!-- MODAL VER DETALLE UBICACIÓN -->
+<div class="modal-overlay" id="modal-ver-ubicacion">
+  <div class="modal" style="max-width:600px;">
+    <div style="display:flex; gap:10px; margin-bottom:14px;">
+      <div class="card" style="flex:1; padding:10px 14px;">
+        <div style="font-size:11px; color:var(--c-text3);">📍 Ubicación</div>
+        <div id="vu-ubicacion" style="font-size:20px; font-weight:700;">—</div>
+      </div>
+      <div class="card" style="flex:1; padding:10px 14px;">
+        <div style="font-size:11px; color:var(--c-text3);">📋 Tipo de Ubicación</div>
+        <div id="vu-tipo" style="font-size:20px; font-weight:700;">—</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; margin-bottom:14px;">
+      <div class="card" style="flex:1; padding:10px 14px;">
+        <div style="font-size:11px; color:var(--c-text3);">✅ Estado</div>
+        <div id="vu-estado" style="font-size:16px; font-weight:700;">—</div>
+      </div>
+      <div class="card" style="flex:1; padding:10px 14px;">
+        <div style="font-size:11px; color:var(--c-text3);">⚠️ Faltante</div>
+        <div id="vu-faltante" style="font-size:16px; font-weight:700; color:var(--c-red);">—</div>
+      </div>
+    </div>
+    <div class="card" style="padding:10px 14px; margin-bottom:14px;">
+      <span id="vu-cod" style="font-family:var(--f-mono);"></span> &nbsp;
+      <span id="vu-desc" style="font-weight:600;"></span>
+    </div>
+    <table style="width:100%;">
+      <thead><tr><th>Cant</th><th>Fecha</th><th>Lote</th><th>Estado</th></tr></thead>
+      <tbody id="vu-lotes"></tbody>
+    </table>
+    <div style="text-align:right; margin-top:16px;">
+      <button class="btn" onclick="suCerrarVer()">Cerrar</button>
+    </div>
+  </div>
+</div>
 
 <!-- MODAL CLASIFICAR / NUEVA O.C. -->
 <div class="modal-overlay" id="modal-clasificar">
@@ -2740,6 +2775,35 @@ function _bpFechaOrden(fechaMostrar) {
   var mes = parseInt(partes[0], 10) || 0;
   var anio = parseInt(partes[1], 10) || 0;
   return anio * 12 + mes;
+}
+ function suVerDetalle(cod) {
+  // Datos de ejemplo — más adelante esto se reemplaza por datos reales del Sheet
+  document.getElementById('vu-ubicacion').textContent = 'R21-B';
+  document.getElementById('vu-tipo').textContent = 'PICKING';
+  document.getElementById('vu-estado').textContent = 'REP URG';
+  document.getElementById('vu-faltante').textContent = '132';
+  document.getElementById('vu-cod').textContent = cod;
+  document.getElementById('vu-desc').textContent = 'OLEOS VITALES Brillo-Luminosidad-Nutric. x 30ml';
+
+  var lotesEjemplo = [
+    { cant: 24, fecha: 'ene-25', lote: '789',   estado: 'Vencido' },
+    { cant: 12, fecha: 'dic-28', lote: 'EO272', estado: 'OK' },
+    { cant: 36, fecha: 'ene-28', lote: 'ASDF',  estado: 'Por vencer' }
+  ];
+  var tbody = document.getElementById('vu-lotes');
+  tbody.innerHTML = lotesEjemplo.map(function(l) {
+    return '<tr><td>' + l.cant + '</td><td>' + l.fecha + '</td><td>' + l.lote + '</td><td>' + l.estado + '</td></tr>';
+  }).join('');
+
+  document.getElementById('modal-ver-ubicacion').classList.add('open');
+}
+
+function suCerrarVer() {
+  document.getElementById('modal-ver-ubicacion').classList.remove('open');
+}
+
+function suAbrirReponer(cod) {
+  showToast('Flujo de Reponer — próximo paso a construir (' + cod + ')');
 }
 // REMITO
 // ──────────────────────────────────────────────
