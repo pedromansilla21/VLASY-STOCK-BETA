@@ -1128,6 +1128,9 @@
     <button class="nav-item" id="nav-buscador-palets" onclick="switchPanel('buscador-palets')">
       <i class="ti ti-package-search"></i><span>Buscador de Palets</span>
     </button>
+       <button class="nav-item" id="nav-stock-ubicacion" onclick="switchPanel('stock-ubicacion')">
+      <i class="ti ti-map-pin"></i><span>Stock por Ubicación</span>
+    </button>
     <div class="sidebar-label">Sistema</div>
     <button class="nav-item" id="nav-usuarios" onclick="abrirModalUsuarios()">
       <i class="ti ti-users"></i><span>Usuarios</span>
@@ -1774,6 +1777,55 @@
         </div>
       </div>
     </div>
+   <!-- ═══ PANEL STOCK POR UBICACIÓN ═══ -->
+<div id="panel-stock-ubicacion" class="panel">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Stock por Ubicación</div>
+      <div class="page-sub">Reposición entre Palet, Reserva y Picking</div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:0; overflow:hidden;">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th></th>
+            <th>Cod. Producto</th>
+            <th>Descripción</th>
+            <th>Marca</th>
+            <th style="text-align:center;">Cantidad</th>
+            <th style="text-align:center;">Estado</th>
+            <th>Ubicación</th>
+            <th>Tipo Ubicación</th>
+            <th style="text-align:center;">Cant. Faltante</th>
+            <th style="text-align:center;">Estado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tbody-su">
+          <tr>
+            <td><button class="btn btn-sm" onclick="suVerDetalle('2042')" style="background:#f1c40f;color:#000;">👁 VER</button></td>
+            <td style="font-family:var(--f-mono);font-size:12px;">2042</td>
+            <td>OLEOS VITALES Brillo-Luminosidad-Nutric.</td>
+            <td>Hanna Colins</td>
+            <td style="text-align:center;font-weight:600;">84</td>
+            <td style="text-align:center;"><span style="background:var(--c-green-bg);color:var(--c-green);font-size:11px;padding:2px 8px;border-radius:4px;font-weight:600;">70%</span></td>
+            <td>R21-B</td>
+            <td>PICKING</td>
+            <td style="text-align:center;font-weight:600;color:var(--c-red);">132</td>
+            <td style="text-align:center;"><span style="background:var(--c-red-bg);color:var(--c-red);font-size:11px;padding:2px 8px;border-radius:4px;font-weight:600;">REP URG</span></td>
+            <td><button class="btn btn-sm" onclick="suAbrirReponer('2042')" style="background:#e67e22;color:#fff;">🔄 REPONER</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="su-empty" style="display:none; text-align:center; padding:32px; color:var(--c-text3); font-size:13px;">
+      Sin resultados
+    </div>
+  </div>
+</div>
 
   </main>
 </div>
