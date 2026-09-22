@@ -1128,7 +1128,7 @@
     <button class="nav-item" id="nav-buscador-palets" onclick="switchPanel('buscador-palets')">
       <i class="ti ti-package-search"></i><span>Buscador de Palets</span>
     </button>
-       <button class="nav-item" id="nav-stock-ubicacion" onclick="switchPanel('stock-ubicacion')">
+      <button class="nav-item" id="nav-stock-ubicacion" onclick="switchPanel('stock-ubicacion'); suLoad();">
       <i class="ti ti-map-pin"></i><span>Stock por Ubicación</span>
     </button>
     <div class="sidebar-label">Sistema</div>
@@ -1805,19 +1805,6 @@
           </tr>
         </thead>
         <tbody id="tbody-su">
-          <tr>
-            <td><button class="btn btn-sm" onclick="suVerDetalle('2042')" style="background:#f1c40f;color:#000;">👁 VER</button></td>
-            <td style="font-family:var(--f-mono);font-size:12px;">2042</td>
-            <td>OLEOS VITALES Brillo-Luminosidad-Nutric.</td>
-            <td>Hanna Colins</td>
-            <td style="text-align:center;font-weight:600;">84</td>
-            <td style="text-align:center;"><span style="background:var(--c-green-bg);color:var(--c-green);font-size:11px;padding:2px 8px;border-radius:4px;font-weight:600;">70%</span></td>
-            <td>R21-B</td>
-            <td>PICKING</td>
-            <td style="text-align:center;font-weight:600;color:var(--c-red);">132</td>
-            <td style="text-align:center;"><span style="background:var(--c-red-bg);color:var(--c-red);font-size:11px;padding:2px 8px;border-radius:4px;font-weight:600;">REP URG</span></td>
-            <td><button class="btn btn-sm" onclick="suAbrirReponer('2042')" style="background:#e67e22;color:#fff;">🔄 REPONER</button></td>
-          </tr>
         </tbody>
       </table>
     </div>
@@ -2804,6 +2791,87 @@ function suCerrarVer() {
 
 function suAbrirReponer(cod) {
   showToast('Flujo de Reponer — próximo paso a construir (' + cod + ')');
+}
+ var _suDatos = [];
+var _suCargado = false;
+
+function suRefresh() {
+  _suCargado = false;
+  _suDatos = [];
+  suLoad();
+}
+
+async function suLoad() {
+  if (_suCargado) return;
+  try {
+    var url = GAS_URL + '?accion=leerRango&rango=' + encodeURIComponent("'STOCK POR UBICACION'!A:M");
+    var resp = await fetch(url, { cache: 'no-store' });
+    var data = await resp.json();
+    if (!data.ok || !Array.isArray(data.data)) throw new Error('Sin datos');
+
+    _suDatos = data.data
+      .filter(function(row) {
+        var cod = String(row[0] || '').trim();
+        return cod && cod.toLowerCase() !== 'a' && cod.toLowerCase() !== 'código';
+      })
+      .map(function(row) {
+        var stock  = parseInt(row[4], 10) || 0;
+        var optimo = parseInt(row[7], 10) || 0;
+        var pct = optimo > 0 ? Math.round((stock / optimo) * 100) : 0;
+        return {
+          cod:        String(row[0] || '').trim(),
+          desc:       String(row[1] || '').trim(),
+          marca:      String(row[3] || '').trim(),
+          stock:      stock,
+          pct:        pct,
+          faltante:   parseInt(row[5], 10) || 0,
+          min:        parseInt(row[6], 10) || 0,
+          optimo:     optimo,
+          max:        parseInt(row[8], 10) || 0,
+          ubicacion:  String(row[9]  || '—').trim(),
+          tipoUbi:    String(row[10] || '—').trim(),
+          estado:     String(row[11] || 'OK').trim(),
+          codUbi:     String(row[12] || '—').trim()
+        };
+      });
+
+    _suCargado = true;
+    suRenderizar(_suDatos);
+  } catch(e) {
+    console.error('Stock por Ubicación error:', e);
+  }
+}
+ function suRenderizar(datos) {
+  var tbody = document.getElementById('tbody-su');
+  var emptyEl = document.getElementById('su-empty');
+  if (!tbody) return;
+  if (!datos.length) {
+    tbody.innerHTML = '';
+    if (emptyEl) emptyEl.style.display = '';
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  tbody.innerHTML = datos.map(function(d) {
+    var colorEstado = d.estado === 'OK' ? 'var(--c-green)' :
+                       d.estado === 'POSIBLE FALTANTE' ? 'var(--c-amber)' : 'var(--c-red)';
+    var bgEstado = d.estado === 'OK' ? 'var(--c-green-bg)' :
+                    d.estado === 'POSIBLE FALTANTE' ? '#3a2e1a' : 'var(--c-red-bg)';
+    var mostrarReponer = d.estado !== 'OK';
+    return '<tr>' +
+      '<td><button class="btn btn-sm" onclick="suVerDetalle(\'' + d.cod + '\')" style="background:#f1c40f;color:#000;">👁 VER</button></td>' +
+      '<td style="font-family:var(--f-mono);font-size:12px;">' + escHtml(d.cod) + '</td>' +
+      '<td>' + escHtml(d.desc) + '</td>' +
+      '<td>' + escHtml(d.marca) + '</td>' +
+      '<td style="text-align:center;font-weight:600;">' + d.stock + '</td>' +
+      '<td style="text-align:center;"><span style="background:var(--c-green-bg);color:var(--c-green);font-size:11px;padding:2px 8px;border-radius:4px;font-weight:600;">' + d.pct + '%</span></td>' +
+      '<td>' + escHtml(d.ubicacion) + '</td>' +
+      '<td>' + escHtml(d.tipoUbi) + '</td>' +
+      '<td style="text-align:center;font-weight:600;color:var(--c-red);">' + d.faltante + '</td>' +
+      '<td style="text-align:center;"><span style="background:' + bgEstado + ';color:' + colorEstado + ';font-size:11px;padding:2px 8px;border-radius:4px;font-weight:600;">' + escHtml(d.estado) + '</span></td>' +
+      '<td>' + (mostrarReponer ? '<button class="btn btn-sm" onclick="suAbrirReponer(\'' + d.cod + '\')" style="background:#e67e22;color:#fff;">🔄 REPONER</button>' : '') + '</td>' +
+    '</tr>';
+  }).join('');
 }
 // REMITO
 // ──────────────────────────────────────────────
