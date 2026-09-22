@@ -2764,14 +2764,18 @@ function _bpFechaOrden(fechaMostrar) {
   return anio * 12 + mes;
 }
  function suVerDetalle(cod) {
-  // Datos de ejemplo — más adelante esto se reemplaza por datos reales del Sheet
-  document.getElementById('vu-ubicacion').textContent = 'R21-B';
-  document.getElementById('vu-tipo').textContent = 'PICKING';
-  document.getElementById('vu-estado').textContent = 'REP URG';
-  document.getElementById('vu-faltante').textContent = '132';
-  document.getElementById('vu-cod').textContent = cod;
-  document.getElementById('vu-desc').textContent = 'OLEOS VITALES Brillo-Luminosidad-Nutric. x 30ml';
+  var d = _suDatos.find(function(x){ return x.cod === cod; });
+  if (!d) { showToast('No se encontró el artículo'); return; }
 
+  document.getElementById('vu-ubicacion').textContent = d.ubicacion;
+  document.getElementById('vu-tipo').textContent = d.tipoUbi;
+  document.getElementById('vu-estado').textContent = d.estado;
+  document.getElementById('vu-faltante').textContent = d.faltante;
+  document.getElementById('vu-cod').textContent = d.cod;
+  document.getElementById('vu-desc').textContent = d.desc;
+
+  // Los lotes (cant/fecha/lote/estado) todavía son de ejemplo —
+  // falta definir de qué hoja salen estos datos
   var lotesEjemplo = [
     { cant: 24, fecha: 'ene-25', lote: '789',   estado: 'Vencido' },
     { cant: 12, fecha: 'dic-28', lote: 'EO272', estado: 'OK' },
