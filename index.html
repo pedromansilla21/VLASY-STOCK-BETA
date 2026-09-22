@@ -2764,7 +2764,7 @@ function _bpFechaOrden(fechaMostrar) {
   return anio * 12 + mes;
 }
  function suVerDetalle(cod) {
-  var d = _suDatos.find(function(x){ return x.cod === cod; });
+ var d = _suDatos.find(function(x){ return x.codUbi === cod; });
   if (!d) { showToast('No se encontró el artículo'); return; }
 
   document.getElementById('vu-ubicacion').textContent = d.ubicacion;
@@ -2863,7 +2863,7 @@ async function suLoad() {
                     d.estado === 'POSIBLE FALTANTE' ? '#3a2e1a' : 'var(--c-red-bg)';
     var mostrarReponer = d.estado !== 'OK';
     return '<tr>' +
-      '<td><button class="btn btn-sm" onclick="suVerDetalle(\'' + d.cod + '\')" style="background:#f1c40f;color:#000;">👁 VER</button></td>' +
+     '<td><button class="btn btn-sm" onclick="suVerDetalle(\'' + d.codUbi + '\')" style="background:#f1c40f;color:#000;">👁 VER</button></td>' +
       '<td style="font-family:var(--f-mono);font-size:12px;">' + escHtml(d.cod) + '</td>' +
       '<td>' + escHtml(d.desc) + '</td>' +
       '<td>' + escHtml(d.marca) + '</td>' +
