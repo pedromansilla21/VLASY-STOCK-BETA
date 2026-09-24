@@ -4205,8 +4205,7 @@ var incompletas = remito.filter(function(r){ return (r.unidadesControladas || 0)
       var ocOrig = ordenes.find(function(o){ return o.id === ocObj.paletOriginalId; });
       if (ocOrig && ocOrig.lineas) {
         ocObj.lineas.forEach(function(lineaRep) {
-          var cantRestada = (typeof lineaRep.unidadesControladas !== 'undefined' && lineaRep.unidadesControladas > 0)
-            ? lineaRep.unidadesControladas : (lineaRep.cantUnidades || 0);
+          var cantRestada = lineaRep.unidadesControladas || 0;
           if (cantRestada <= 0) return;
           // Buscar la línea por cod+lote, luego solo cod como fallback
           var lineaOrig = ocOrig.lineas.find(function(l){ return l.cod === lineaRep.cod && l.lote === lineaRep.lote; });
@@ -4559,6 +4558,11 @@ function processScan() {
     return;
   }
 
+ if (remitoDatos.esReposicion && (linea.unidadesControladas || 0) >= (linea.cantUnidades || 0)) {
+  showAlert(al, 'err', '⛔ ' + art.desc + ' — Ya completaste lo pedido (' + linea.cantUnidades + ' u.), no se suma de más');
+  flashBar('err');
+  return;
+}
   var esEAN = art.cbSuelto && raw === art.cbSuelto;
 
   if (esEAN) {
@@ -5565,9 +5569,7 @@ async function _restarEnHistorialPalets(oc, escaneadoPor) {
       // Prioridad: unidadesControladas (lo que el operario efectivamente escaneó)
       // Fallback: cantUnidades (lo que se pedía reponer) — por si unidadesControladas
       // quedó en 0 por algún problema de sincronización
-      var escaneadas = (typeof linea.unidadesControladas !== 'undefined' && linea.unidadesControladas > 0)
-        ? linea.unidadesControladas
-        : (linea.cantUnidades || 0);
+     var escaneadas = linea.unidadesControladas || 0;
       return {
         cod:             linea.cod   || '—',
         palet:           oc.palet    || '—',
