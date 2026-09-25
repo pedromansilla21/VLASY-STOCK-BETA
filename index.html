@@ -2414,7 +2414,14 @@ function updateClock() {
  function revisarAlertas() {
   if (!CURRENT_USER) return;
   if (CURRENT_USER.rol === 'operario') {
-    if (typeof _checkAlertaEscaneo === 'function') _checkAlertaEscaneo();
+        _retryIntentos = 0; _retryEnCursoAlerta = null;
+    showToast('🔄 Buscando pedidos...');
+    var _esperarYRevisar = function() {
+      if (_busy_syncOrdenes) return setTimeout(_esperarYRevisar, 500);
+      _checkAlertaEscaneo();
+    };
+    syncOrdenes().then(_esperarYRevisar);
+    return;
   } else {
     if (typeof _checkFinalizadoOC === 'function') _checkFinalizadoOC();
     if (typeof syncAlertasOperario === 'function') syncAlertasOperario();
@@ -4284,7 +4291,7 @@ var incompletas = remito.filter(function(r){ return (r.unidadesControladas || 0)
   // bloqueando el slot para siempre. Después de 2 minutos, el operario la
   // limpia él mismo como fallback — el admin la habrá visto en ese tiempo
   // si estaba conectado (su polling es cada 15s).
-  setTimeout(function() {
+ if (false) setTimeout(function() {
     sheetsRead('ALERTAS!A' + filaParaFinalizar).then(function(rows) {
       var val = rows && rows[0] && rows[0][0] ? String(rows[0][0]).trim() : 'VACIO';
       if (val.startsWith('FINALIZADO|')) {
@@ -4296,7 +4303,7 @@ var incompletas = remito.filter(function(r){ return (r.unidadesControladas || 0)
   // Si es operario: quedarse en escaneo
   // Esperar 30 segundos antes de liberar el slot para que el admin vea FINALIZADO
   if (CURRENT_USER && CURRENT_USER.rol === 'operario') {
-    if (CURRENT_USER.filaAlerta) {
+    if (false) {
       setTimeout(function() {
         fetch(GAS_URL, {
           method: 'POST',
