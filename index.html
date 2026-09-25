@@ -2426,7 +2426,6 @@ function updateClock() {
     if (typeof _checkFinalizadoOC === 'function') _checkFinalizadoOC();
     if (typeof syncAlertasOperario === 'function') syncAlertasOperario();
     if (CURRENT_USER.name === 'Supervisor Pedidos' && typeof syncAlertasRemito === 'function') syncAlertasRemito();
-    syncOrdenes();
   }
   showToast('🔄 Alertas revisadas');
 }
@@ -8850,15 +8849,12 @@ async function syncAlertasOperario() {
     }
 
     // 2. Verificar solicitudes de edición manual en col C (para todos los no-operarios)
- var _operariosConFila = ((await syncUsuarios()) || loadUsers()).filter(function(u){ return u.rol === 'operario' && u.filaAlerta; });
+    var _operariosConFila = loadUsers().filter(function(u){ return u.rol === 'operario' && u.filaAlerta; });
     if (_operariosConFila.length > 0) {
      try {
+  var _todasC = await sheetsRead('ALERTAS!C1:C10');
   var _filasC = [];
-  for (var _oi = 0; _oi < _operariosConFila.length; _oi++) {
-    var _opFila = _operariosConFila[_oi].filaAlerta;
-    var _r = await sheetsRead('ALERTAS!C' + _opFila + ':C' + _opFila);
-    _filasC[_opFila - 1] = (_r && _r[0]) ? _r[0] : [];
-  }
+  _operariosConFila.forEach(function(u){ _filasC[u.filaAlerta - 1] = _todasC[u.filaAlerta - 1] || []; });
   if (typeof _checkSolicitudesEdicion === 'function') _checkSolicitudesEdicion(_filasC, _operariosConFila);
 } catch(e2) {}
     }
