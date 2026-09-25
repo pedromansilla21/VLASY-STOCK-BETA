@@ -6364,7 +6364,8 @@ function renderOrdenes() {
         '<div id="oc-lineas-wrap-' + oc.id + '">' + renderLineasOCTable((_paletStockData[oc.id] || oc.lineas), oc.id) + '</div>' +
         '<div class="oc-actions">' +
           '<button class="btn btn-primary btn-sm" onclick="enviarOCAlEscaneo(' + "'" + oc.id + "'" + ')"><i class="ti ti-barcode"></i> Enviar al escaneo</button>' +
-          (oc.esPalet && oc.estadoManual === 'finalizado' ? '<button class="btn btn-sm" style="background:var(--c-teal,#0D9488);color:#fff;border-color:var(--c-teal,#0D9488);" onclick="abrirModalReposicion(' + "'" + oc.id + "'" + ')"><i class="ti ti-arrow-back-up"></i> Reposición</button>' : '') +
+                   (oc.esPalet && oc.estadoManual === 'finalizado' ? '<button class="btn btn-sm" style="background:var(--c-teal,#0D9488);color:#fff;border-color:var(--c-teal,#0D9488);" onclick="abrirModalReposicion(' + "'" + oc.id + "'" + ')"><i class="ti ti-arrow-back-up"></i> Reposición</button>' : '') +
+          (oc.esPalet && oc.estadoManual === 'finalizado' ? '<button class="btn btn-sm" onclick="event.stopPropagation();_cargarStockFrescoPalet(' + "'" + oc.id + "'" + ')"><i class="ti ti-refresh"></i> Actualizar stock</button>' : '') +
           '<button class="btn btn-sm" onclick="abrirModalClasificar(' + "'" + oc.id + "'" + ')"><i class="ti ti-edit"></i> Editar</button>' +
           '<button class="btn btn-sm" onclick="exportarOCExcel(' + "'" + oc.id + "'" + ')"><i class="ti ti-file-spreadsheet"></i> Exportar Excel</button>' +
           '<button class="btn btn-danger btn-sm" onclick="eliminarOC(' + "'" + oc.id + "'" + ')"><i class="ti ti-trash"></i> Eliminar</button>' +
@@ -6648,7 +6649,7 @@ function toggleOCBodyPalet(ocId, bodyId) {
   var estabaAbierto = body.classList.contains('open');
   body.classList.toggle('open');
   // Solo cargar cuando se abre (no cuando se cierra) y si no cargó ya
-  if (!estabaAbierto && !_paletStockCargado[ocId]) {
+ if (false) {
     _cargarStockFrescoPalet(ocId);
   }
 }
@@ -6659,15 +6660,16 @@ async function _cargarStockFrescoPalet(ocId) {
     var oc = ordenes.find(function(o){ return o.id === ocId; });
     // Solo aplica a palets finalizados — los pendientes/en proceso no tienen stock en HISTORIAL DE PALETS
     if (!oc || !oc.esPalet || !oc.palet || oc.estadoManual !== 'finalizado') return;
+    showToast('🔄 Actualizando stock del palet...');
 
     var url = GAS_URL + '?accion=leerRango&rango=' + encodeURIComponent("'HISTORIAL DE PALETS'!A:O");
     var resp = await fetch(url, { cache: 'no-store' });
     var data = await resp.json();
-    if (!data.ok || !Array.isArray(data.data) || data.data.length === 0) return;
+    if (!data.ok || !Array.isArray(data.data) || data.data.length === 0) { showToast('⚠ No se pudo actualizar, probá de nuevo'); return; }
 
     var paletNum = String(oc.palet || '').trim();
     var filas = data.data.filter(function(row){ return String(row[8]||'').trim() === paletNum; });
-    if (filas.length === 0) return;
+        if (filas.length === 0) { showToast('⚠ Este palet no aparece en HISTORIAL DE PALETS'); return; }
 
     // Agrupar por Cod (misma lógica que abrirModalReposicion)
     var grupos = {}, ordenCods = [];
@@ -6739,9 +6741,10 @@ async function _cargarStockFrescoPalet(ocId) {
     var wrapRC = document.getElementById('rc-lineas-wrap-' + ocId);
     if (wrapRC) wrapRC.innerHTML = tablaHtml;
 
-    _paletStockCargado[ocId] = true;
+        _paletStockCargado[ocId] = true;
+    showToast('✅ Stock actualizado');
   } catch(e) {
-    // Falla silenciosa — no interrumpir la experiencia
+       showToast('⚠ No se pudo actualizar, probá de nuevo');
   }
 }
 
