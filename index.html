@@ -1099,6 +1099,7 @@
   </div>
   <div class="topbar-sep"></div>
   <div class="topbar-date" id="topbar-date"></div>
+ <button onclick="revisarAlertas()" style="margin-left:8px;padding:4px 10px;border-radius:6px;border:1px solid #ccc;background:#fff;cursor:pointer;font-size:13px">🔄 Revisar alertas</button>
 </div>
 
 <!-- LAYOUT -->
@@ -2410,6 +2411,18 @@ function updateClock() {
   } catch(e) {}
 })();
 // ─────────────────────────────────────────────────────────────
+ function revisarAlertas() {
+  if (!CURRENT_USER) return;
+  if (CURRENT_USER.rol === 'operario') {
+    if (typeof _checkAlertaEscaneo === 'function') _checkAlertaEscaneo();
+  } else {
+    if (typeof _checkFinalizadoOC === 'function') _checkFinalizadoOC();
+    if (typeof syncAlertasOperario === 'function') syncAlertasOperario();
+    if (CURRENT_USER.name === 'Supervisor Pedidos' && typeof syncAlertasRemito === 'function') syncAlertasRemito();
+    syncOrdenes();
+  }
+  showToast('🔄 Alertas revisadas');
+}
 if (!window._clockInterval) { window._clockInterval = setInterval(updateClock, 1000); }
 updateClock();
 if (!window._syncOrdenesInterval) { window._syncOrdenesInterval = 
@@ -2420,7 +2433,7 @@ if (!window._conexionInterval) { window._conexionInterval = setInterval(function
 // syncOrdenes terminara, pero como ahora todo pasa por el GAS (más lento),
 // podía saltear ciclos y el operario no recibía la notificación a tiempo.
 // Corre cada 3s: más rápido para que el operario reciba alertas sin demora
-if (!window._alertasInterval) { window._alertasInterval = setInterval(function(){
+if (false) { window._alertasInterval = setInterval(function(){
   if (typeof _checkFinalizadoOC === 'function') _checkFinalizadoOC();
   if (CURRENT_USER && CURRENT_USER.rol === 'operario' && typeof sheetsRead === 'function') {
     // Una sola lectura de ALERTAS!A{fila} por ciclo — antes _checkAlertaEscaneo
@@ -8802,9 +8815,8 @@ function iniciarSincAlertasOperario() {
   if (!CURRENT_USER) return;
   if (CURRENT_USER.rol === 'operario') return; // evita 2do polling leyendo la misma celda
   if (_sincAlertasOperarioInterval) clearInterval(_sincAlertasOperarioInterval);
-  _sincAlertasOperarioInterval = setInterval(syncAlertasOperario, 35000);
+  // automático desactivado — se usa el botón "Revisar alertas"
   setTimeout(syncAlertasOperario, 500);
-  setTimeout(syncAlertasOperario, 12000);
 }
 
 var _busy_syncAlertasOperario = false;
@@ -8975,7 +8987,7 @@ var _sincAlertasInterval = null;
 function iniciarSincAlertasRemito() {
   // Sincronizar cada 3 segundos
   if (_sincAlertasInterval) clearInterval(_sincAlertasInterval);
-  _sincAlertasInterval = setInterval(syncAlertasRemito, 35000);
+   // automático desactivado — se usa el botón "Revisar alertas"
   syncAlertasRemito(); // Primera vez inmediatamente
 }
 
