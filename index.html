@@ -6387,7 +6387,7 @@ function renderOrdenes() {
     var allBodies = document.querySelectorAll('.oc-card-body.open');
     allBodies.forEach(function(bodyEl) {
       var _wrapEl = document.getElementById('oc-lineas-wrap-' + oc.id);
-      if (_wrapEl && bodyEl.contains(_wrapEl)) {
+            if (false) {
         _cargarStockFrescoPalet(oc.id);
       }
     });
@@ -7256,7 +7256,12 @@ async function _verificarYEnviar(ocId, filaAlerta) {
 }
 
 
-function _ejecutarEnvioEscaneo(ocId, filaAlerta) {
+async function _ejecutarEnvioEscaneo(ocId, filaAlerta) {
+  if (CURRENT_USER && CURRENT_USER.rol === 'administrativo') {
+    showToast('🔄 Preparando envío...');
+    await syncOrdenes();
+    while (_busy_syncOrdenes) { await new Promise(function(r){ setTimeout(r, 300); }); }
+  }
   filaAlerta = filaAlerta || 1;
   var ordenes = loadOrdenes();
   var oc = ordenes.find(function(o){ return o.id === ocId; });
