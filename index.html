@@ -7894,7 +7894,7 @@ function guardarClasificacion() {
     // escaneó mientras el modal estaba abierto, ocBase.lineas tiene el estado
     // real (más reciente). Mergeamos campo a campo: el admin puede cambiar
     // cantidades esperadas, descripción, etc.; el operario conserva lo escaneado.
-    if (_clasLineas.length > 0 && ocBase.lineas && ocBase.lineas.length > 0) {
+       if (_clasLineas.length > 0 && ocBase.lineas && ocBase.lineas.length > 0 && ocBase.estadoManual !== 'finalizado') {
       _clasLineas = _clasLineas.map(function(linea) {
         var actual = ocBase.lineas.find(function(l){ return String(l.cod) === String(linea.cod); });
         if (!actual) return linea;
