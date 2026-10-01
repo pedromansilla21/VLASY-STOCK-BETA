@@ -8466,7 +8466,7 @@ async function _verificarUsuarioDisponible(nombreUsuario) {
   // Si el deviceId es este mismo dispositivo, dejar pasar (reconexión)
   if (deviceId === _getDeviceId()) return true;
   // Si el heartbeat tiene más de 30s, considerar sesión caída
-  if (Date.now() - ts > 30000) return true;
+    if (Date.now() - ts > 150000) return true;
   return false; // ocupado
 }
 
@@ -8474,7 +8474,7 @@ function _arrancarHeartbeat(nombreUsuario) {
   _detenerHeartbeat();
   _sesionHeartbeatInterval = setInterval(function() {
     _registrarSesionActiva(nombreUsuario);
-  }, 30000);
+  }, 120000);
 }
 
 function _detenerHeartbeat() {
