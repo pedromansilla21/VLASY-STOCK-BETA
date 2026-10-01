@@ -7544,7 +7544,20 @@ function abrirModalClasificar(ocId) {
       selEstado(oc.estadoManual || 'pendiente');
       // Mostrar sección de líneas en modo edición
       document.getElementById('clas-lineas-zona').style.display = 'block';
-      _clasLineas = (oc.lineas || []).map(function(l){ return Object.assign({}, l); });
+           _clasLineas = (oc.lineas || []).map(function(l){
+        var c = Object.assign({}, l);
+        if (c.divisiones && c.divisiones.length > 0) {
+          var _up = parseInt(c.unidadesPorCaja || c.cantCaja || 1, 10) || 1;
+          c.divisiones = c.divisiones.map(function(d){
+            var n = Object.assign({}, d);
+            if (typeof n.cantReal === 'undefined') {
+              n.cantReal = (parseInt(n.unidades, 10) || 0) || ((parseInt(n.cajas, 10) || 0) * _up);
+            }
+            return n;
+          });
+        }
+        return c;
+      });
       _clasRenderLineas();
     }
   } else {
