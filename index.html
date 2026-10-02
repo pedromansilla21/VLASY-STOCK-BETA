@@ -5744,6 +5744,7 @@ async function _guardarEnHistorialPalets(oc, escaneadoPor) {
         filas: filas
       })
     });
+       if (filas.length > 0) _verificarHistorialPalet(filas).catch(function(){});
   } catch(e) { console.error('Error en _guardarEnHistorialPalets:', e); }
 }
 
@@ -6713,7 +6714,7 @@ async function _verificarHistorialPalet(filasEnviadas, intento) {
       if (idx >= 0) { usadas[idx] = true; }
       else { faltantes[String(f.cod).trim()] = true; hayFaltantes = true; }
     });
-    if (!hayFaltantes) return true;
+    if (!hayFaltantes) { console.log('[verif historial] OK palet', palet, 'intento', intento); return true; }
   }
   if (intento >= 3) {
     showToast(data ? '⚠ El palet ' + filasEnviadas[0].palet + ' no se grabó completo en el historial. Avisá a un supervisor.' : '⚠ No se pudo verificar el guardado del palet ' + filasEnviadas[0].palet);
@@ -6721,6 +6722,7 @@ async function _verificarHistorialPalet(filasEnviadas, intento) {
   }
   if (data) {
     // Reenviar TODAS las filas de cada código con problema (el GAS borra y reescribe por palet + código)
+   console.log('[verif historial] reenviando códigos', Object.keys(faltantes), 'intento', intento);
     var reenviar = filasEnviadas.filter(function(f){ return faltantes[String(f.cod).trim()]; });
     fetch(GAS_URL, {
       method: 'POST',
