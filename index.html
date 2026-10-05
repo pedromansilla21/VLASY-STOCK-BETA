@@ -3467,6 +3467,7 @@ function mostrarPanelConfirmacionRack(ocObj) {
           return;
         }
         linea.tipoUbicacion = tipoLimpio;
+         linea.codUbi = codigoEsc;
         _fase = 'cajas';
         showToast('✅ Rack validado — ' + tipoLimpio);
         renderModal();
@@ -3494,6 +3495,12 @@ function mostrarPanelConfirmacionRack(ocObj) {
       overlay.remove();
       window._pickingBetaConfirmado = true;
       window._pickingBetaLineas = lineasPendientes;
+           lineasPendientes.forEach(function(l) {
+        if (!l.codUbi || !(l.cant > 0)) return;
+        fetch(GAS_URL, { method: 'POST', mode: 'no-cors',
+          body: JSON.stringify({ accion: 'sumarStockUbicacion', codigo: l.codUbi, cant: l.cant,
+            movId: 'SU_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) }) });
+      });
       showToast('✅ Todas las posiciones confirmadas — finalizando...');
       finalizarControl();
     } else {
@@ -4168,7 +4175,9 @@ var incompletas = remito.filter(function(r){ return (r.unidadesControladas || 0)
 
   // Mandar a la nube cualquier escaneo que todavía no se haya sincronizado
   // (por si quedó alguno pendiente del debounce de 1.5s)
+  if (!(remitoDatos.esReposicion && CURRENT_USER && CURRENT_USER.pickingBeta)) {
   await sincronizarEscaneosANube();
+}
 
   var ocObj = {
     id: id,
@@ -4351,7 +4360,7 @@ function updateMetrics() {
 var diff = remito.filter(function(r){ return (r.unidadesControladas || 0) > 0 && (r.unidadesControladas || 0) !== _uEspBase(r); }).length;
   var totalCajas = registro.length;
   document.getElementById('m-lineas').textContent    = lineas;
-  document.getElementById('m-escaneos').textContent  = totalCajas;
+  document.getElementById('m-escaneos').textContent  = remito.reduce(function(a, r){ return a + (r.unidadesControladas || 0); }, 0);
   document.getElementById('m-ok').textContent        = ok;
   document.getElementById('m-diff').textContent      = diff;
   document.getElementById('badge-scanner').textContent  = totalCajas;
