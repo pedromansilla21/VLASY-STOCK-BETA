@@ -4525,6 +4525,18 @@ function processScan() {
   var linea = remito.find(function(r){ return String(r.cod).trim() === artCodNorm && (r.unidadesControladas||0) < (r.cantUnidades||0); });
   if (!linea) linea = remito.find(function(r){ return String(r.cod).trim() === artCodNorm; });
   // debug: loguear si no encuentra
+   if (remitoDatos.esReposicion) {
+    if (!linea) {
+      showAlert(al, 'err', '⛔ ' + art.desc + ' — No se pide en esta reposición');
+      flashBar('err');
+      return;
+    }
+    if ((linea.unidadesControladas || 0) >= (linea.cantUnidades || 0)) {
+      showAlert(al, 'err', '⛔ ' + art.desc + ' — Ya completaste lo pedido (' + linea.cantUnidades + ' u.), no se suma de más');
+      flashBar('err');
+      return;
+    }
+  }
 
   var hora = new Date().toLocaleString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'});
   registro.push({
