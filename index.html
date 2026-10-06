@@ -3420,7 +3420,7 @@ function mostrarPanelConfirmacionRack(ocObj) {
       window._pickingBetaConfirmado = false;
       window._pickingBetaLineas = null;
       window._pickingBetaOcObj = null;
-      showToast('Confirmación cancelada — la reposición no se finalizó');
+      showToast('Cancelado — la baja del palet ya se hizo, falta ubicar en el rack');
     });
 
     // Siguiente → avanza a siguiente línea o finaliza
@@ -3501,8 +3501,16 @@ function mostrarPanelConfirmacionRack(ocObj) {
           body: JSON.stringify({ accion: 'sumarStockUbicacion', codigo: l.codUbi, cant: l.cant,
             movId: 'SU_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) }) });
       });
-      showToast('✅ Todas las posiciones confirmadas — finalizando...');
-      finalizarControl();
+            var _filasUbi = lineasPendientes.map(function(l) {
+        return [l.cod || '—', l.desc || '—', l.categoria || '—', l.marca || '—',
+                l.cant || 0, l.fecha || '—', l.lote || '—', l.tipoUbicacion || 'PICKING', 'ENTRADA'];
+      });
+      fetch(GAS_URL, { method: 'POST', mode: 'no-cors',
+        body: JSON.stringify({ accion: 'agregarFilas', rango: 'ESCANEO UBICACIONES!A1', values: _filasUbi }) });
+      window._pickingBetaLineas = null;
+      window._pickingBetaConfirmado = false;
+      window._pickingBetaOcObj = null;
+      showToast('✅ Reposición ubicada en el rack');
     } else {
       renderModal();
     }
@@ -4220,11 +4228,9 @@ var incompletas = remito.filter(function(r){ return (r.unidadesControladas || 0)
   ocObj._esRepEfectiva = !!(ocObj.esReposicion || (ocObj.nro && String(ocObj.nro).indexOf('REP-') === 0));
   if (ocObj._esRepEfectiva) {
     // ── PICKING BETA: mostrar panel de confirmación de destino ──────────────
-    if (CURRENT_USER && CURRENT_USER.pickingBeta && !window._pickingBetaConfirmado) {
+    if (CURRENT_USER && CURRENT_USER.pickingBeta) {
       window._pickingBetaOcObj = ocObj;
-      window._busy_finalizarControl = false;
-      mostrarPanelConfirmacionRack(ocObj);
-      return;
+      window._abrirPanelRackAlFinal = ocObj;
     }
     // ── FIN PICKING BETA ────────────────────────────────────────────────────
 
@@ -4279,6 +4285,11 @@ var incompletas = remito.filter(function(r){ return (r.unidadesControladas || 0)
     _guardarDetalleHistorial(ocObj, escaneadoPorVal, 'REPOSICIÓN');
   }
 
+   if (window._abrirPanelRackAlFinal) {
+    var _ocPanel = window._abrirPanelRackAlFinal;
+    window._abrirPanelRackAlFinal = null;
+    mostrarPanelConfirmacionRack(_ocPanel);
+  }
   // Limpiar panel de escaneo (para todos los roles)
   remito = [];
   registro = [];
