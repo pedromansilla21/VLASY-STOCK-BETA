@@ -2814,6 +2814,8 @@ async function suVerDetalle(cod) {
         var cant = parseInt(f[4], 10) || 0;
         var lote = String(f[6] || '').trim();
         var fecha = String(f[5] || '').trim();
+var mIso = fecha.match(/^(\d{4})-(\d{2})-\d{2}T/);
+if (mIso) fecha = mIso[2] + '/' + mIso[1];
         var clave = lote + '|' + fecha;
         if (!mapa[clave]) mapa[clave] = { cant: 0, fecha: fecha, lote: lote };
         if (accion === 'ENTRADA') mapa[clave].cant += cant;
