@@ -2788,7 +2788,7 @@ function _bpFechaOrden(fechaMostrar) {
   var anio = parseInt(partes[1], 10) || 0;
   return anio * 12 + mes;
 }
- function suVerDetalle(cod) {
+async function suVerDetalle(cod) {
  var d = _suDatos.find(function(x){ return x.codUbi === cod; });
   if (!d) { showToast('No se encontró el artículo'); return; }
 
@@ -2799,17 +2799,36 @@ function _bpFechaOrden(fechaMostrar) {
   document.getElementById('vu-cod').textContent = d.cod;
   document.getElementById('vu-desc').textContent = d.desc;
 
-  // Los lotes (cant/fecha/lote/estado) todavía son de ejemplo —
-  // falta definir de qué hoja salen estos datos
-  var lotesEjemplo = [
-    { cant: 24, fecha: 'ene-25', lote: '789',   estado: 'Vencido' },
-    { cant: 12, fecha: 'dic-28', lote: 'EO272', estado: 'OK' },
-    { cant: 36, fecha: 'ene-28', lote: 'ASDF',  estado: 'Por vencer' }
-  ];
-  var tbody = document.getElementById('vu-lotes');
-  tbody.innerHTML = lotesEjemplo.map(function(l) {
-    return '<tr><td>' + l.cant + '</td><td>' + l.fecha + '</td><td>' + l.lote + '</td><td>' + l.estado + '</td></tr>';
-  }).join('');
+     var tbody = document.getElementById('vu-lotes');
+    tbody.innerHTML = '<tr><td colspan="4">Cargando...</td></tr>';
+    var lotes = [];
+    try {
+      var rUrl = GAS_URL + '?accion=leerRango&rango=' + encodeURIComponent("'REGISTRO POR UBICACION'!A:J");
+      var rResp = await fetch(rUrl, { cache: 'no-store' });
+      var rData = await rResp.json();
+      var filas = (rData.ok && Array.isArray(rData.data)) ? rData.data : [];
+      var mapa = {};
+      filas.forEach(function(f) {
+        if (String(f[7] || '').trim() !== d.codUbi) return;
+        var accion = String(f[9] || '').trim().toUpperCase();
+        var cant = parseInt(f[4], 10) || 0;
+        var lote = String(f[6] || '').trim();
+        var fecha = String(f[5] || '').trim();
+        var clave = lote + '|' + fecha;
+        if (!mapa[clave]) mapa[clave] = { cant: 0, fecha: fecha, lote: lote };
+        if (accion === 'ENTRADA') mapa[clave].cant += cant;
+        if (accion === 'SALIDA') mapa[clave].cant -= cant;
+      });
+      lotes = Object.keys(mapa).map(function(k){ return mapa[k]; })
+        .filter(function(l){ return l.cant > 0; });
+    } catch (e) {
+      console.error('VER lotes error:', e);
+    }
+    tbody.innerHTML = lotes.length
+      ? lotes.map(function(l) {
+          return '<tr><td>' + l.cant + '</td><td>' + l.fecha + '</td><td>' + l.lote + '</td><td>—</td></tr>';
+        }).join('')
+      : '<tr><td colspan="4">Sin lotes registrados</td></tr>';
 
   document.getElementById('modal-ver-ubicacion').classList.add('open');
 }
