@@ -2839,8 +2839,40 @@ function suCerrarVer() {
   document.getElementById('modal-ver-ubicacion').classList.remove('open');
 }
 
-function suAbrirReponer(cod) {
-  showToast('Flujo de Reponer — próximo paso a construir (' + cod + ')');
+async function suAbrirReponer(cod) {
+  try {
+    var url = GAS_URL + '?accion=leerRango&rango=' + encodeURIComponent("'REGISTRO POR UBICACION'!A:J");
+    var resp = await fetch(url, { cache: 'no-store' });
+    var data = await resp.json();
+    var filas = (data.ok && Array.isArray(data.data)) ? data.data : [];
+    var mapa = {};
+    filas.forEach(function(f) {
+      if (String(f[0] || '').trim() !== cod) return;
+      var ubi = String(f[7] || '').trim();
+      if (!/REPOSICION$/i.test(ubi)) return;
+      var accion = String(f[9] || '').trim().toUpperCase();
+      var cant = parseInt(f[4], 10) || 0;
+      var lote = String(f[6] || '').trim();
+      var fecha = String(f[5] || '').trim();
+      var m = fecha.match(/^(\d{4})-(\d{2})-\d{2}T/);
+      if (m) fecha = m[2] + '/' + m[1];
+      var clave = ubi + '|' + lote + '|' + fecha;
+      if (!mapa[clave]) mapa[clave] = { ubi: ubi, lote: lote, fecha: fecha, cant: 0 };
+      if (accion === 'ENTRADA') mapa[clave].cant += cant;
+      if (accion === 'SALIDA') mapa[clave].cant -= cant;
+    });
+    var lotes = Object.keys(mapa).map(function(k){ return mapa[k]; })
+      .filter(function(l){ return l.cant > 0; });
+    console.log('REPONER', cod, lotes);
+    if (lotes.length) {
+      showToast('Reserva de ' + cod + ': ' + lotes.length + ' lote(s) (ver consola)');
+    } else {
+      showToast('Sin reserva de ' + cod + ': hay que buscar en palets');
+    }
+  } catch (e) {
+    console.error('REPONER error:', e);
+    showToast('Error al buscar la reserva');
+  }
 }
  var _suDatos = [];
 var _suCargado = false;
