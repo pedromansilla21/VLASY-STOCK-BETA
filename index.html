@@ -9215,20 +9215,8 @@ function _checkTareaReposicion() {
 }
 
 function _renderBannerTarea() {
-  var T = window._tareaRepActiva;
   var b = document.getElementById('banner-tarea-rep');
-  if (!T) { if (b) b.remove(); return; }
-  if (!b) {
-    b = document.createElement('div');
-    b.id = 'banner-tarea-rep';
-    b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9000;padding:12px 16px;text-align:center;font-size:14px;font-weight:600;color:#fff;';
-    document.body.appendChild(b);
-  }
-  b.style.background = T.ubiOk ? '#2e8b57' : '#b45309';
-  b.innerHTML = (T.ubiOk
-    ? 'Escaneá ' + escHtml(T.cod) + ' · lote ' + escHtml(T.lote) + ' · ' + T.escaneadas + ' / ' + T.cant
-    : '🔒 BLOQUEADO — Escaneá la ubicación: ' + escHtml(T.ubiDestino)) +
-    ' <button class="btn" style="margin-left:12px;" onclick="window._tareaRepActiva=null;_renderBannerTarea();">Cancelar</button>';
+  if (b) b.remove();
 }
 
 async function _verTareas() {
