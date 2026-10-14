@@ -2441,6 +2441,7 @@ function updateClock() {
     var _esperarYRevisar = function() {
       if (_busy_syncOrdenes) return setTimeout(_esperarYRevisar, 500);
       _checkAlertaEscaneo();
+     if (typeof _checkTareaReposicion === 'function') _checkTareaReposicion();
     };
        if (_edicionManualPendiente) {
       var _fEd = CURRENT_USER.filaAlerta || 1;
@@ -9158,6 +9159,35 @@ function mostrarNotificacionAlerta(alertaTexto, filaAlerta) {
     overlay.remove();
     _ejecutarEnvioEscaneo(ocId, filaAlerta);
   });
+}
+ var _tareaRepVista = '';
+var _busy_checkTareaRep = false;
+function _checkTareaReposicion() {
+  if (!CURRENT_USER || CURRENT_USER.rol !== 'operario' || !CURRENT_USER.filaAlerta) return;
+  if (_busy_checkTareaRep) return;
+  _busy_checkTareaRep = true;
+  sheetsRead('ALERTAS!D' + CURRENT_USER.filaAlerta).then(function(rows) {
+    var val = (rows && rows[0] && rows[0][0]) ? String(rows[0][0]).trim() : '';
+    if (val.indexOf('TAREA_REPOSICION|') !== 0 || val === _tareaRepVista) return;
+    return sheetsRead('TAREAS REPOSICION!A2:J').then(function(t) {
+      _tareaRepVista = val;
+      var mias = (t || []).filter(function(r) {
+        return String(r[8]).trim() === CURRENT_USER.name && String(r[9]).trim() === 'PENDIENTE';
+      });
+      if (!mias.length || document.getElementById('modal-tarea-rep')) return;
+      var lista = mias.map(function(r) {
+        return '<div style="font-size:13px;margin:6px 0;">' + escHtml(String(r[2])) + ' · lote ' + escHtml(String(r[3])) + ' · <b>' + escHtml(String(r[5])) + ' u</b></div>';
+      }).join('');
+      var ov = document.createElement('div');
+      ov.id = 'modal-tarea-rep';
+      ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.65);display:flex;align-items:center;justify-content:center;z-index:9999;';
+      ov.innerHTML = '<div style="background:var(--c-surface2);border-radius:16px;padding:28px;max-width:400px;width:90%;text-align:center;">' +
+        '<div style="font-size:18px;font-weight:700;margin-bottom:12px;">Tarea de reposición</div>' +
+        '<div style="font-size:12px;color:var(--c-text3);margin-bottom:8px;">RESERVA → PICKING</div>' + lista +
+        '<button class="btn btn-success" style="width:100%;height:44px;margin-top:16px;" onclick="document.getElementById(\'modal-tarea-rep\').remove()">Entendido</button></div>';
+      document.body.appendChild(ov);
+    });
+  }).catch(function(){}).finally(function(){ _busy_checkTareaRep = false; });
 }
 
 // ── SOLICITUDES DE EDICIÓN MANUAL — lado supervisor ─────────────────────
