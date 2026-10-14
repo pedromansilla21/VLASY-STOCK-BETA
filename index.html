@@ -9176,6 +9176,7 @@ function _checkTareaReposicion() {
         return String(r[8]).trim() === CURRENT_USER.name && String(r[9]).trim() === 'PENDIENTE';
       });
       if (!mias.length || document.getElementById('modal-tarea-rep')) return;
+     window._tareasRepPend = mias;
       var lista = mias.map(function(r) {
         return '<div style="font-size:13px;margin:6px 0;">' + escHtml(String(r[2])) + ' · lote ' + escHtml(String(r[3])) + ' · <b>' + escHtml(String(r[5])) + ' u</b></div>';
       }).join('');
@@ -9185,10 +9186,48 @@ function _checkTareaReposicion() {
       ov.innerHTML = '<div style="background:var(--c-surface2);border-radius:16px;padding:28px;max-width:400px;width:90%;text-align:center;">' +
         '<div style="font-size:18px;font-weight:700;margin-bottom:12px;">Tarea de reposición</div>' +
         '<div style="font-size:12px;color:var(--c-text3);margin-bottom:8px;">RESERVA → PICKING</div>' + lista +
-        '<button class="btn btn-success" style="width:100%;height:44px;margin-top:16px;" onclick="document.getElementById(\'modal-tarea-rep\').remove()">Entendido</button></div>';
+           '<button class="btn btn-success" style="width:100%;height:44px;margin-top:16px;" onclick="_comenzarTarea()">Comenzar</button></div>';
       document.body.appendChild(ov);
     });
   }).catch(function(){}).finally(function(){ _busy_checkTareaRep = false; });
+}
+ async function _comenzarTarea() {
+  var t = (window._tareasRepPend || [])[0];
+  if (!t) return;
+  var cod = String(t[2]).trim();
+  var rows = await sheetsRead('STOCK POR UBICACION!A2:M');
+  var fila = (rows || []).find(function(r){
+    return String(r[0]).trim() === cod && /PICKING$/.test(String(r[12] || '').trim());
+  });
+  if (!fila) { showToast('No encontré la ubicación de picking de ' + cod); return; }
+  var m = document.getElementById('modal-tarea-rep'); if (m) m.remove();
+  window._tareaRepActiva = {
+    id: t[0], cod: cod, lote: String(t[3]), fechaLote: String(t[4]),
+    cant: parseInt(t[5], 10) || 0, ubiDestino: String(fila[12]).trim(),
+    ubiOk: false, escaneadas: 0
+  };
+  _renderBannerTarea();
+}
+
+function _renderBannerTarea() {
+  var T = window._tareaRepActiva;
+  var b = document.getElementById('banner-tarea-rep');
+  if (!T) { if (b) b.remove(); return; }
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'banner-tarea-rep';
+    b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9000;padding:12px 16px;text-align:center;font-size:14px;font-weight:600;color:#fff;';
+    document.body.appendChild(b);
+  }
+  b.style.background = T.ubiOk ? '#2e8b57' : '#b45309';
+  b.innerHTML = (T.ubiOk
+    ? 'Escaneá ' + escHtml(T.cod) + ' · lote ' + escHtml(T.lote) + ' · ' + T.escaneadas + ' / ' + T.cant
+    : '🔒 BLOQUEADO — Escaneá la ubicación: ' + escHtml(T.ubiDestino)) +
+    ' <button class="btn" style="margin-left:12px;" onclick="window._tareaRepActiva=null;_renderBannerTarea();">Cancelar</button>';
+}
+
+function _procesarScanTarea(raw) {
+  showToast('Escaneo de tarea: falta programar');
 }
 
 // ── SOLICITUDES DE EDICIÓN MANUAL — lado supervisor ─────────────────────
