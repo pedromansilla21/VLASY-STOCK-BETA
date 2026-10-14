@@ -4636,6 +4636,7 @@ function processScan() {
   var raw = document.getElementById('scan-input').value.trim();
   document.getElementById('scan-input').value = '';
   if (!raw) return;
+ if (window._tareaRepActiva) { _procesarScanTarea(raw); return; }
   if (window._lectorEscaneoReciente) window._lectorEscaneoReciente();
 
   var al = document.getElementById('alert-scan');
