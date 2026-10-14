@@ -3262,7 +3262,7 @@ function renderTablaControl() {
   if (remito.length === 0) {
    if (window._tareasRepPend && window._tareasRepPend.length) {
   tb.innerHTML = window._tareasRepPend.map(function(t){
-    return '<tr><td>' + escHtml(String(t[2])) + '</td><td>Reposición RESERVA → PICKING</td><td style="text-align:center;">' + escHtml(String(t[5])) + ' u</td><td style="text-align:center;">lote ' + escHtml(String(t[3])) + '</td><td colspan="5">Escaneá la ubicación de picking para habilitar</td></tr>';
+  return '<tr><td>' + escHtml(String(t[2])) + '</td><td>Reposición RESERVA → PICKING</td><td style="text-align:center;">' + escHtml(String(t[5])) + ' u</td><td style="text-align:center;">lote ' + escHtml(String(t[3])) + '</td><td colspan="5">🔒 Bloqueado · escaneá <b>' + escHtml((window._ubiTareas || {})[String(t[2]).trim()] || 'la ubicación') + '</b></td></tr>';
   }).join('');
   if (btnFin) btnFin.style.display = 'none';
   return;
@@ -4643,7 +4643,7 @@ function processScan() {
   var raw = document.getElementById('scan-input').value.trim();
   document.getElementById('scan-input').value = '';
   if (!raw) return;
- if (window._tareaRepActiva) { _procesarScanTarea(raw); return; }
+ if (window._tareasRepPend && window._tareasRepPend.length || window._tareaRepActiva) { if (_procesarScanTarea(raw)) return; }
   if (window._lectorEscaneoReciente) window._lectorEscaneoReciente();
 
   var al = document.getElementById('alert-scan');
@@ -9233,12 +9233,35 @@ function _renderBannerTarea() {
     ' <button class="btn" style="margin-left:12px;" onclick="window._tareaRepActiva=null;_renderBannerTarea();">Cancelar</button>';
 }
 
-function _procesarScanTarea(raw) {
-  showToast('Escaneo de tarea: falta programar');
-}
- function _verTareas() {
+async function _verTareas() {
   var m = document.getElementById('modal-tarea-rep'); if (m) m.remove();
+  try {
+    var rows = await sheetsRead('STOCK POR UBICACION!A2:M');
+    window._ubiTareas = {};
+    (rows || []).forEach(function(r){
+      var u = String(r[12] || '').trim();
+      if (/PICKING$/.test(u)) window._ubiTareas[String(r[0]).trim()] = u;
+    });
+  } catch(e) {}
   if (typeof renderTablaControl === 'function') renderTablaControl();
+}
+
+function _procesarScanTarea(raw) {
+  var T = window._tareaRepActiva;
+  if (!T) {
+    var pend = window._tareasRepPend || [];
+    var t = pend.find(function(x){ return (window._ubiTareas || {})[String(x[2]).trim()] === raw; });
+    if (!t) return false;
+    window._tareaRepActiva = {
+      id: t[0], cod: String(t[2]).trim(), lote: String(t[3]), fechaLote: String(t[4]),
+      cant: parseInt(t[5], 10) || 0, ubiDestino: raw, ubiOk: true, escaneadas: 0
+    };
+    _renderBannerTarea();
+    showToast('Ubicación OK. Escaneá los artículos');
+    return true;
+  }
+  showToast('Escaneo de artículos: falta programar');
+  return true;
 }
 
 // ── SOLICITUDES DE EDICIÓN MANUAL — lado supervisor ─────────────────────
