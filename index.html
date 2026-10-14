@@ -3260,6 +3260,13 @@ function renderTablaControl() {
   var tb = document.getElementById('tbody-control');
   var btnFin = document.getElementById('btn-finalizar-control');
   if (remito.length === 0) {
+   if (window._tareasRepPend && window._tareasRepPend.length) {
+  tb.innerHTML = window._tareasRepPend.map(function(t){
+    return '<tr><td>' + escHtml(String(t[2])) + '</td><td>Reposición RESERVA → PICKING</td><td style="text-align:center;">' + escHtml(String(t[5])) + ' u</td><td style="text-align:center;">lote ' + escHtml(String(t[3])) + '</td><td colspan="5">Escaneá la ubicación de picking para habilitar</td></tr>';
+  }).join('');
+  if (btnFin) btnFin.style.display = 'none';
+  return;
+}
     tb.innerHTML = '<tr><td colspan="9"><div class="empty-state"><i class="ti ti-barcode"></i><p>Cargá un remito primero</p></div></td></tr>';
     if (btnFin) btnFin.style.display = 'none';
     return;
@@ -9186,7 +9193,7 @@ function _checkTareaReposicion() {
       ov.innerHTML = '<div style="background:var(--c-surface2);border-radius:16px;padding:28px;max-width:400px;width:90%;text-align:center;">' +
         '<div style="font-size:18px;font-weight:700;margin-bottom:12px;">Tarea de reposición</div>' +
         '<div style="font-size:12px;color:var(--c-text3);margin-bottom:8px;">RESERVA → PICKING</div>' + lista +
-           '<button class="btn btn-success" style="width:100%;height:44px;margin-top:16px;" onclick="_comenzarTarea()">Comenzar</button></div>';
+              '<button class="btn btn-success" style="width:100%;height:44px;margin-top:16px;" onclick="_verTareas()">Ver tareas</button></div>';
       document.body.appendChild(ov);
     });
   }).catch(function(){}).finally(function(){ _busy_checkTareaRep = false; });
@@ -9228,6 +9235,10 @@ function _renderBannerTarea() {
 
 function _procesarScanTarea(raw) {
   showToast('Escaneo de tarea: falta programar');
+}
+ function _verTareas() {
+  var m = document.getElementById('modal-tarea-rep'); if (m) m.remove();
+  if (typeof renderTablaControl === 'function') renderTablaControl();
 }
 
 // ── SOLICITUDES DE EDICIÓN MANUAL — lado supervisor ─────────────────────
