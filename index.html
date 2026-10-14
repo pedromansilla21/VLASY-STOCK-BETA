@@ -3260,13 +3260,11 @@ function renderTablaControl() {
   var tb = document.getElementById('tbody-control');
   var btnFin = document.getElementById('btn-finalizar-control');
   if (remito.length === 0) {
-   if (window._tareasRepPend && window._tareasRepPend.length) {
-  tb.innerHTML = window._tareasRepPend.map(function(t){
-  return '<tr><td>' + escHtml(String(t[2])) + '</td><td>Reposición RESERVA → PICKING</td><td style="text-align:center;">' + escHtml(String(t[5])) + ' u</td><td style="text-align:center;">lote ' + escHtml(String(t[3])) + '</td><td colspan="5">🔒 Bloqueado · escaneá <b>' + escHtml((window._ubiTareas || {})[String(t[2]).trim()] || 'la ubicación') + '</b></td></tr>';
-  }).join('');
-  if (btnFin) btnFin.style.display = 'none';
-  return;
-}
+        if (window._tareasRepPend && window._tareasRepPend.length) {
+        tb.innerHTML = _htmlFilasTareas();
+        if (btnFin) btnFin.style.display = 'none';
+        return;
+      }
     tb.innerHTML = '<tr><td colspan="9"><div class="empty-state"><i class="ti ti-barcode"></i><p>Cargá un remito primero</p></div></td></tr>';
     if (btnFin) btnFin.style.display = 'none';
     return;
@@ -9246,24 +9244,62 @@ async function _verTareas() {
   if (typeof renderTablaControl === 'function') renderTablaControl();
 }
 
+function _tareasAgrupadas() {
+  var g = {}, orden = [];
+  (window._tareasRepPend || []).forEach(function(t){
+    var k = String(t[2]).trim() + '|' + String(t[3]).trim();
+    if (!g[k]) { g[k] = { cod: String(t[2]).trim(), lote: String(t[3]).trim(), fechaLote: String(t[4]), cant: 0, ids: [] }; orden.push(k); }
+    g[k].cant += parseInt(t[5], 10) || 0;
+    g[k].ids.push(t[0]);
+  });
+  return orden.map(function(k){ return g[k]; });
+}
+
+function _htmlFilasTareas() {
+  var T = window._tareaRepActiva;
+  return _tareasAgrupadas().map(function(g){
+    var art = db.find(function(a){ return a.cod === g.cod; }) || {};
+    var activa = T && T.cod === g.cod && T.lote === g.lote;
+    var hecha = activa && T.hecha;
+    var color = hecha ? '#2e8b57' : (activa ? '#e08a1e' : '#6b7280');
+    var bg = hecha ? 'rgba(46,139,87,0.12)' : (activa ? 'rgba(224,138,30,0.12)' : 'rgba(107,114,128,0.08)');
+    var esc = activa ? T.escaneadas : 0;
+    var pct = g.cant ? Math.min(100, Math.round(esc * 100 / g.cant)) : 0;
+    var estado = hecha ? '✓ Completa' : (activa ? 'Habilitada' : '🔒 Bloqueada');
+    var ubi = (window._ubiTareas || {})[g.cod] || 'la ubicación';
+    var prog = activa
+      ? '<div style="height:8px;background:rgba(255,255,255,0.1);border-radius:4px;"><div style="height:8px;width:' + pct + '%;background:' + color + ';border-radius:4px;"></div></div><div style="font-size:11px;margin-top:2px;">' + pct + '%</div>'
+      : '<span style="font-size:12px;">Escaneá <b>' + escHtml(ubi) + '</b></span>';
+    return '<tr style="background:' + bg + ';border-left:3px solid ' + color + ';">' +
+      '<td style="font-family:monospace;">' + escHtml(g.cod) + '</td>' +
+      '<td style="color:' + color + ';">' + escHtml(art.desc || 'Reposición RESERVA → PICKING') + '<div style="font-size:11px;opacity:.7;">lote ' + escHtml(g.lote) + '</div></td>' +
+      '<td style="text-align:center;">' + g.cant + ' u.</td>' +
+      '<td style="text-align:center;"><b style="font-size:18px;color:' + color + ';">' + esc + '</b><span style="opacity:.6;">/' + g.cant + ' u.</span></td>' +
+      '<td>' + prog + '</td>' +
+      '<td style="color:' + color + ';font-weight:600;">' + estado + '</td>' +
+      '<td></td></tr>';
+  }).join('');
+}
+
 function _procesarScanTarea(raw) {
   var T = window._tareaRepActiva;
   if (!T) {
-    var pend = window._tareasRepPend || [];
-    var t = pend.find(function(x){ return (window._ubiTareas || {})[String(x[2]).trim()] === raw; });
-    if (!t) return false;
+    var grupos = _tareasAgrupadas();
+    var g = grupos.find(function(x){ return (window._ubiTareas || {})[x.cod] === raw; });
+    if (!g) return false;
     window._tareaRepActiva = {
-      id: t[0], cod: String(t[2]).trim(), lote: String(t[3]), fechaLote: String(t[4]),
-      cant: parseInt(t[5], 10) || 0, ubiDestino: raw, ubiOk: true, escaneadas: 0
+      ids: g.ids, cod: g.cod, lote: g.lote, fechaLote: g.fechaLote,
+      cant: g.cant, ubiDestino: raw, ubiOk: true, escaneadas: 0, hecha: false
     };
     _renderBannerTarea();
+    renderTablaControl();
     showToast('Ubicación OK. Escaneá los artículos');
     return true;
   }
   showToast('Escaneo de artículos: falta programar');
   return true;
 }
-
+ 
 // ── SOLICITUDES DE EDICIÓN MANUAL — lado supervisor ─────────────────────
 var _solicitudesEdicionVistas = {};
 
