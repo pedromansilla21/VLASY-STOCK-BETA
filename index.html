@@ -2892,9 +2892,8 @@ async function suAbrirReponer(cod) {
     }
     var art = _suDatos.find(function(x){ return x.cod === cod; });
     document.getElementById('rp-cod').textContent = cod;
-    document.getElementById('rp-desc').textContent = art ? art.desc : '';
-    document.getElementById('rp-lotes').innerHTML = lotes.map(function(l) {
-      return '<tr><td>' + l.cant + '</td><td>' + l.fecha + '</td><td>' + l.lote +
+        document.getElementById('rp-lotes').innerHTML = lotes.map(function(l) {
+      return '<tr data-ubi="' + l.ubi + '"><td>' + l.cant + '</td><td>' + l.fecha + '</td><td>' + l.lote +
         '</td><td><input type="number" min="0" max="' + l.cant + '" value="0" style="width:70px;"></td></tr>';
     }).join('');
        document.getElementById('rp-operario').innerHTML = loadUsers().map(function(u) {
@@ -2920,7 +2919,7 @@ async function suAbrirReponer(cod) {
     if (cant <= 0) continue;
     await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({
       accion: 'crearTareaReposicion', articulo: cod, lote: tds[2].textContent,
-      fechaLote: tds[1].textContent, cant: cant, origen: 'RESERVA',
+   fechaLote: tds[1].textContent, cant: cant, origen: filas[i].getAttribute('data-ubi') || 'RESERVA',
       destino: 'PICKING', operario: operario }) });
     n++;
   }
