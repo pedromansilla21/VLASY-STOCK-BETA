@@ -9292,7 +9292,19 @@ function _procesarScanTarea(raw) {
     showToast('Ubicación OK. Escaneá los artículos');
     return true;
   }
-  showToast('Escaneo de artículos: falta programar');
+   if (T.hecha) { showToast('Reposición completa'); return true; }
+  if (raw === T.ubiDestino) { showToast('Ubicación ya escaneada. Escaneá los artículos'); return true; }
+  var artT = db.find(function(a){ return String(a.cbCaja).trim() === raw || String(a.cbSuelto).trim() === raw || String(a.cod).trim() === raw; });
+  if (!artT) { showToast('Código no encontrado: ' + raw); return true; }
+  if (String(artT.cod).trim() !== String(T.cod).trim()) { showToast('⛔ ' + (artT.desc || artT.cod) + ' no es de esta tarea'); return true; }
+  var esCajaT = !!artT.cbCaja && String(artT.cbCaja).trim() === raw;
+  var uT = esCajaT ? (parseInt(artT.cantCaja, 10) || 0) : (parseInt(artT.unidSuelto, 10) || 1);
+  if (!uT) { showToast('La caja no tiene unidades cargadas en Artículos'); return true; }
+  var faltaT = T.cant - T.escaneadas;
+  if (uT > faltaT) { showToast('⛔ Te pasás: faltan ' + faltaT + ' u. y esto suma ' + uT); return true; }
+  T.escaneadas += uT;
+  if (T.escaneadas >= T.cant) { T.hecha = true; showToast('✓ Reposición completa'); }
+  renderTablaControl();
   return true;
 }
  
