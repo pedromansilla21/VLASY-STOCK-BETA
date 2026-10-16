@@ -9188,7 +9188,7 @@ function _checkTareaReposicion() {
         return String(r[8]).trim() === CURRENT_USER.name && String(r[9]).trim() === 'PENDIENTE';
       });
       if (!mias.length || document.getElementById('modal-tarea-rep')) return;
-     window._tareasRepPend = mias;
+        window._tareasRepMias = mias;
       var lista = mias.map(function(r) {
         return '<div style="font-size:13px;margin:6px 0;">' + escHtml(String(r[2])) + ' · lote ' + escHtml(String(r[3])) + ' · <b>' + escHtml(String(r[5])) + ' u</b></div>';
       }).join('');
@@ -9228,6 +9228,7 @@ function _renderBannerTarea() {
 
 async function _verTareas() {
   var m = document.getElementById('modal-tarea-rep'); if (m) m.remove();
+  window._tareasRepPend = (window._tareasRepMias || []).slice();
   try {
     var rows = await sheetsRead('STOCK POR UBICACION!A2:M');
     window._ubiTareas = {};
