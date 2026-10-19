@@ -9242,8 +9242,8 @@ async function _verTareas() {
 function _tareasAgrupadas() {
   var g = {}, orden = [];
   (window._tareasRepPend || []).forEach(function(t){
-    var k = String(t[2]).trim() + '|' + String(t[3]).trim();
-    if (!g[k]) { g[k] = { cod: String(t[2]).trim(), lote: String(t[3]).trim(), fechaLote: String(t[4]), cant: 0, ids: [] }; orden.push(k); }
+    var k = String(t[2]).trim() + '|' + String(t[3]).trim() + '|' + String(t[6]).trim();
+    if (!g[k]) { g[k] = { cod: String(t[2]).trim(), lote: String(t[3]).trim(), fechaLote: String(t[4]), origen: String(t[6]).trim(), cant: 0, ids: [] }; orden.push(k); }
     g[k].cant += parseInt(t[5], 10) || 0;
     g[k].ids.push(t[0]);
   });
@@ -9261,7 +9261,7 @@ function _htmlFilasTareas() {
     var esc = activa ? T.escaneadas : 0;
     var pct = g.cant ? Math.min(100, Math.round(esc * 100 / g.cant)) : 0;
     var estado = hecha ? '✓ Completa' : (activa ? 'Habilitada' : '🔒 Bloqueada');
-    var ubi = (window._ubiTareas || {})[g.cod] || 'la ubicación';
+        var ubi = g.origen || 'la reserva';
     var prog = activa
       ? '<div style="height:8px;background:rgba(255,255,255,0.1);border-radius:4px;"><div style="height:8px;width:' + pct + '%;background:' + color + ';border-radius:4px;"></div></div><div style="font-size:11px;margin-top:2px;">' + pct + '%</div>'
       : '<span style="font-size:12px;">Escaneá <b>' + escHtml(ubi) + '</b></span>';
@@ -9275,24 +9275,23 @@ function _htmlFilasTareas() {
       '<td></td></tr>';
   }).join('');
 }
-
 function _procesarScanTarea(raw) {
   var T = window._tareaRepActiva;
   if (!T) {
     var grupos = _tareasAgrupadas();
-    var g = grupos.find(function(x){ return (window._ubiTareas || {})[x.cod] === raw; });
+    var g = grupos.find(function(x){ return x.origen === raw; });
     if (!g) return false;
     window._tareaRepActiva = {
       ids: g.ids, cod: g.cod, lote: g.lote, fechaLote: g.fechaLote,
-      cant: g.cant, ubiDestino: raw, ubiOk: true, escaneadas: 0, hecha: false
+      cant: g.cant, ubiOrigen: g.origen, ubiOk: true, escaneadas: 0, hecha: false
     };
     _renderBannerTarea();
     renderTablaControl();
-    showToast('Ubicación OK. Escaneá los artículos');
+    showToast('Origen OK. Escaneá los artículos');
     return true;
   }
-   if (T.hecha) { showToast('Reposición completa'); return true; }
-  if (raw === T.ubiDestino) { showToast('Ubicación ya escaneada. Escaneá los artículos'); return true; }
+  if (T.hecha) { showToast('Reposición completa'); return true; }
+  if (raw === T.ubiOrigen) { showToast('Origen ya escaneado. Escaneá los artículos'); return true; }
   var artT = db.find(function(a){ return String(a.cbCaja).trim() === raw || String(a.cbSuelto).trim() === raw || String(a.cod).trim() === raw; });
   if (!artT) { showToast('Código no encontrado: ' + raw); return true; }
   if (String(artT.cod).trim() !== String(T.cod).trim()) { showToast('⛔ ' + (artT.desc || artT.cod) + ' no es de esta tarea'); return true; }
@@ -9306,7 +9305,7 @@ function _procesarScanTarea(raw) {
   renderTablaControl();
   return true;
 }
- 
+
 // ── SOLICITUDES DE EDICIÓN MANUAL — lado supervisor ─────────────────────
 var _solicitudesEdicionVistas = {};
 
