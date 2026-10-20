@@ -3800,7 +3800,7 @@ function borrarLineaControl(i) {
 var _filtroCodCompletarControl = null;
 
 function abrirPanelCompletarControl() {
-   if (window._tareaRepActiva && window._tareaRepActiva.hecha && typeof finalizarTarea === 'function') { finalizarTarea(); return; }
+      if (window._tareaRepActiva && window._tareaRepActiva.hecha && typeof _abrirVerifTarea === 'function') { _abrirVerifTarea(); return; }
   if (remito.length === 0) { showToast('No hay escaneo activo'); return; }
   // Renderizar tabla con fecha, lote, palet por línea
   // (si hay un filtro activo por búsqueda/escaneo, se omiten las líneas que
@@ -10710,6 +10710,49 @@ async function aceptarAlertaEscaneo() {
 </div>
 
 <script>
+ function _normFechaVerif(s) {
+  s = String(s || '').trim();
+  var m = s.match(/(\d{4})-(\d{1,2})/);
+  if (m) return ('0' + m[2]).slice(-2) + '/' + m[1];
+  m = s.match(/(\d{1,2})\/(\d{4})/);
+  if (m) return ('0' + m[1]).slice(-2) + '/' + m[2];
+  return s;
+}
+function _abrirVerifTarea() {
+  var T = window._tareaRepActiva;
+  if (!T || !T.hecha) return;
+  var old = document.getElementById('modal-verif-tarea'); if (old) old.remove();
+  var art = (db || []).find(function(a){ return String(a.cod).trim() === String(T.cod).trim(); }) || {};
+  var d = document.createElement('div');
+  d.className = 'modal-overlay open';
+  d.id = 'modal-verif-tarea';
+  d.style.zIndex = '9998';
+  d.innerHTML = '<div class="modal" style="max-width:420px; padding:28px;">' +
+    '<div class="modal-title" style="margin-bottom:8px;">Verificá lote y fecha</div>' +
+    '<div style="margin-bottom:16px;"><b>' + escHtml(T.cod) + '</b> · ' + escHtml(art.desc || '') + '<br><span style="opacity:.7;">' + T.cant + ' u. a retirar</span></div>' +
+    '<div style="display:flex; gap:8px; margin-bottom:10px;">' +
+    '<input type="number" id="vt-mm" placeholder="MM" style="width:70px;" /><span style="align-self:center;">/</span>' +
+    '<input type="number" id="vt-aa" placeholder="AAAA" style="width:90px;" /></div>' +
+    '<input type="text" id="vt-lote" placeholder="Lote" style="width:100%; margin-bottom:16px;" onkeydown="if(event.key===\'Enter\') _confirmarVerifTarea()" />' +
+    '<div style="display:flex; gap:8px;">' +
+    '<button class="btn" style="flex:1;" onclick="document.getElementById(\'modal-verif-tarea\').remove()">Volver al escaneo</button>' +
+    '<button class="btn btn-primary" style="flex:1;" onclick="_confirmarVerifTarea()">Finalizar y guardar</button></div></div>';
+  document.body.appendChild(d);
+  setTimeout(function(){ var i = document.getElementById('vt-mm'); if (i) i.focus(); }, 100);
+}
+function _confirmarVerifTarea() {
+  var T = window._tareaRepActiva;
+  if (!T) return;
+  var mm = document.getElementById('vt-mm').value.trim();
+  var aa = document.getElementById('vt-aa').value.trim();
+  var lote = document.getElementById('vt-lote').value.trim();
+  if (!mm || !aa || !lote) { showToast('Completá fecha y lote'); return; }
+  var fechaOk = !String(T.fechaLote || '').trim() || _normFechaVerif(('0' + mm).slice(-2) + '/' + aa) === _normFechaVerif(T.fechaLote);
+  var loteOk = lote.toUpperCase() === String(T.lote).trim().toUpperCase();
+  if (!fechaOk || !loteOk) { showToast('⛔ Lote o fecha no coinciden con la tarea. Revisá la mercadería'); return; }
+  document.getElementById('modal-verif-tarea').remove();
+  finalizarTarea();
+}
  async function finalizarTarea() {
   var T = window._tareaRepActiva;
   if (!T || !T.hecha) return;
@@ -10728,7 +10771,7 @@ async function aceptarAlertaEscaneo() {
   }
 }
 function pedirEscaneadoPor() {
-  if (window._tareaRepActiva && window._tareaRepActiva.hecha && typeof finalizarTarea === 'function') { finalizarTarea(); return; }
+    if (window._tareaRepActiva && window._tareaRepActiva.hecha && typeof _abrirVerifTarea === 'function') { _abrirVerifTarea(); return; }
   var inp = document.getElementById('input-escaneado-por');
   if (inp) {
     inp.value = CURRENT_USER ? CURRENT_USER.name : '';
