@@ -9193,7 +9193,7 @@ function _checkTareaReposicion() {
     return sheetsRead('TAREAS REPOSICION!A2:J').then(function(t) {
       _tareaRepVista = val;
       var mias = (t || []).filter(function(r) {
-        return String(r[8]).trim() === CURRENT_USER.name && String(r[9]).trim() === 'PENDIENTE';
+      return String(r[8]).trim() === CURRENT_USER.name && (String(r[9]).trim() === 'PENDIENTE' || String(r[9]).trim() === 'RETIRADA');
       });
       if (!mias.length || document.getElementById('modal-tarea-rep')) return;
         window._tareasRepMias = mias;
@@ -9251,8 +9251,8 @@ async function _verTareas() {
 function _tareasAgrupadas() {
   var g = {}, orden = [];
   (window._tareasRepPend || []).forEach(function(t){
-    var k = String(t[2]).trim() + '|' + String(t[3]).trim() + '|' + String(t[6]).trim();
-    if (!g[k]) { g[k] = { cod: String(t[2]).trim(), lote: String(t[3]).trim(), fechaLote: String(t[4]), origen: String(t[6]).trim(), cant: 0, ids: [] }; orden.push(k); }
+       var k = String(t[2]).trim() + '|' + String(t[3]).trim() + '|' + String(t[6]).trim() + '|' + String(t[9] || 'PENDIENTE').trim();
+    if (!g[k]) { g[k] = { cod: String(t[2]).trim(), lote: String(t[3]).trim(), fechaLote: String(t[4]), origen: String(t[6]).trim(), destino: String(t[7]).trim(), estado: String(t[9] || 'PENDIENTE').trim(), cant: 0, ids: [] }; orden.push(k); }
     g[k].cant += parseInt(t[5], 10) || 0;
     g[k].ids.push(t[0]);
   });
@@ -9269,8 +9269,8 @@ function _htmlFilasTareas() {
     var bg = hecha ? 'rgba(46,139,87,0.12)' : (activa ? 'rgba(224,138,30,0.12)' : 'rgba(107,114,128,0.08)');
     var esc = activa ? T.escaneadas : 0;
     var pct = g.cant ? Math.min(100, Math.round(esc * 100 / g.cant)) : 0;
-    var estado = hecha ? '✓ Completa' : (activa ? 'Habilitada' : '🔒 Bloqueada');
-        var ubi = g.origen || 'la reserva';
+       var estado = hecha ? '✓ Completa' : (activa ? 'Habilitada' : (g.estado === 'RETIRADA' ? 'Falta poner' : '🔒 Bloqueada'));
+             var ubi = (g.estado === 'RETIRADA' ? g.destino : g.origen) || 'la reserva';
     var prog = activa
       ? '<div style="height:8px;background:rgba(255,255,255,0.1);border-radius:4px;"><div style="height:8px;width:' + pct + '%;background:' + color + ';border-radius:4px;"></div></div><div style="font-size:11px;margin-top:2px;">' + pct + '%</div>'
       : '<span style="font-size:12px;">Escaneá <b>' + escHtml(ubi) + '</b></span>';
@@ -9288,15 +9288,15 @@ function _procesarScanTarea(raw) {
   var T = window._tareaRepActiva;
   if (!T) {
     var grupos = _tareasAgrupadas();
-    var g = grupos.find(function(x){ return x.origen === raw; });
+      var g = grupos.find(function(x){ return (x.estado === 'RETIRADA' ? x.destino : x.origen) === raw; });
     if (!g) return false;
     window._tareaRepActiva = {
       ids: g.ids, cod: g.cod, lote: g.lote, fechaLote: g.fechaLote,
-      cant: g.cant, ubiOrigen: g.origen, ubiOk: true, escaneadas: 0, hecha: false
+                    cant: g.cant, estado: g.estado, ubiOrigen: (g.estado === 'RETIRADA' ? g.destino : g.origen), destino: g.destino, ubiOk: true, escaneadas: 0, hecha: false
     };
     _renderBannerTarea();
     renderTablaControl();
-    showToast('Origen OK. Escaneá los artículos');
+       showToast(g.estado === 'RETIRADA' ? 'Destino OK. Dejá los artículos y escaneá' : 'Origen OK. Escaneá los artículos');
     return true;
   }
   if (T.hecha) { showToast('Reposición completa'); return true; }
@@ -9310,7 +9310,7 @@ function _procesarScanTarea(raw) {
   var faltaT = T.cant - T.escaneadas;
   if (uT > faltaT) { showToast('⛔ Te pasás: faltan ' + faltaT + ' u. y esto suma ' + uT); return true; }
   T.escaneadas += uT;
-  if (T.escaneadas >= T.cant) { T.hecha = true; showToast('✓ Reposición completa'); }
+     if (T.escaneadas >= T.cant) { T.hecha = true; showToast('✓ Reposición completa'); if (T.estado === 'RETIRADA' && typeof ponerTarea === 'function') ponerTarea(); }
   renderTablaControl();
   return true;
 }
@@ -10710,6 +10710,23 @@ async function aceptarAlertaEscaneo() {
 </div>
 
 <script>
+ async function ponerTarea() {
+  var T = window._tareaRepActiva;
+  if (!T || !T.hecha || T.estado !== 'RETIRADA') return;
+  if (window._busy_ponerTarea) return;
+  window._busy_ponerTarea = true;
+  try {
+    await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ accion: 'ponerTareas', ids: T.ids }) });
+    window._tareasRepPend = (window._tareasRepPend || []).filter(function(t){ return T.ids.indexOf(t[0]) === -1; });
+    window._tareaRepActiva = null;
+    renderTablaControl();
+    showToast('✓ Dejado en el picking. Tarea completa');
+  } catch (e) {
+    showToast('Error al guardar en el picking. Probá de nuevo');
+  } finally {
+    window._busy_ponerTarea = false;
+  }
+}
  function _normFechaVerif(s) {
   s = String(s || '').trim();
   var m = s.match(/(\d{4})-(\d{1,2})/);
@@ -10760,7 +10777,7 @@ function _confirmarVerifTarea() {
   window._busy_finTarea = true;
   try {
     await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ accion: 'retirarTareas', ids: T.ids }) });
-    window._tareasRepPend = (window._tareasRepPend || []).filter(function(t){ return T.ids.indexOf(t[0]) === -1; });
+       (window._tareasRepPend || []).forEach(function(t){ if (T.ids.indexOf(t[0]) !== -1) t[9] = 'RETIRADA'; });
     window._tareaRepActiva = null;
     renderTablaControl();
     showToast('✓ Retirado de la reserva. Falta ubicar en el picking');
