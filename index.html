@@ -3800,7 +3800,7 @@ function borrarLineaControl(i) {
 var _filtroCodCompletarControl = null;
 
 function abrirPanelCompletarControl() {
-      if (window._tareaRepActiva && window._tareaRepActiva.hecha && typeof _abrirVerifTarea === 'function') { _abrirVerifTarea(); return; }
+        if (window._tareaRepActiva && window._tareaRepActiva.hecha) { if (window._tareaRepActiva.estado === 'RETIRADA' && typeof ponerTarea === 'function') { ponerTarea(); return; } if (typeof _abrirVerifTarea === 'function') { _abrirVerifTarea(); return; } }
   if (remito.length === 0) { showToast('No hay escaneo activo'); return; }
   // Renderizar tabla con fecha, lote, palet por línea
   // (si hay un filtro activo por búsqueda/escaneo, se omiten las líneas que
@@ -9340,7 +9340,7 @@ function _procesarScanTarea(raw) {
   var faltaT = T.cant - T.escaneadas;
   if (uT > faltaT) { showToast('⛔ Te pasás: faltan ' + faltaT + ' u. y esto suma ' + uT); return true; }
   T.escaneadas += uT;
-     if (T.escaneadas >= T.cant) { T.hecha = true; showToast('✓ Reposición completa'); if (T.estado === 'RETIRADA' && typeof ponerTarea === 'function') ponerTarea(); }
+          if (T.escaneadas >= T.cant) { T.hecha = true; showToast('✓ Reposición completa'); }
   renderTablaControl();
   return true;
 }
@@ -10818,7 +10818,7 @@ function _confirmarVerifTarea() {
   }
 }
 function pedirEscaneadoPor() {
-    if (window._tareaRepActiva && window._tareaRepActiva.hecha && typeof _abrirVerifTarea === 'function') { _abrirVerifTarea(); return; }
+    if (window._tareaRepActiva && window._tareaRepActiva.hecha) { if (window._tareaRepActiva.estado === 'RETIRADA' && typeof ponerTarea === 'function') { ponerTarea(); return; } if (typeof _abrirVerifTarea === 'function') { _abrirVerifTarea(); return; } }
   var inp = document.getElementById('input-escaneado-por');
   if (inp) {
     inp.value = CURRENT_USER ? CURRENT_USER.name : '';
