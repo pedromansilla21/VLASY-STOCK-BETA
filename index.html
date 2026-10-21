@@ -9284,6 +9284,7 @@ function _tareasAgrupadas() {
   (window._tareasRepPend || []).forEach(function(t){
        var k = String(t[2]).trim() + '|' + String(t[3]).trim() + '|' + String(t[6]).trim() + '|' + String(t[9] || 'PENDIENTE').trim();
         if (!g[k]) { g[k] = { cod: String(t[2]).trim(), lote: String(t[3]).trim(), fechaLote: String(t[4]), origen: String(t[6]).trim(), destino: ((window._ubiTareas && window._ubiTareas[String(t[2]).trim()]) || String(t[7]).trim()), estado: String(t[9] || 'PENDIENTE').trim(), cant: 0, ids: [] }; orden.push(k); }
+       g[k].cant += parseInt(t[5], 10) || 0;
     g[k].ids.push(t[0]);
   });
   return orden.map(function(k){ return g[k]; });
