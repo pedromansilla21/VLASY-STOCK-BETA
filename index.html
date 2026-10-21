@@ -9283,8 +9283,7 @@ function _tareasAgrupadas() {
   var g = {}, orden = [];
   (window._tareasRepPend || []).forEach(function(t){
        var k = String(t[2]).trim() + '|' + String(t[3]).trim() + '|' + String(t[6]).trim() + '|' + String(t[9] || 'PENDIENTE').trim();
-    if (!g[k]) { g[k] = { cod: String(t[2]).trim(), lote: String(t[3]).trim(), fechaLote: String(t[4]), origen: String(t[6]).trim(), destino: String(t[7]).trim(), estado: String(t[9] || 'PENDIENTE').trim(), cant: 0, ids: [] }; orden.push(k); }
-    g[k].cant += parseInt(t[5], 10) || 0;
+        if (!g[k]) { g[k] = { cod: String(t[2]).trim(), lote: String(t[3]).trim(), fechaLote: String(t[4]), origen: String(t[6]).trim(), destino: ((window._ubiTareas && window._ubiTareas[String(t[2]).trim()]) || String(t[7]).trim()), estado: String(t[9] || 'PENDIENTE').trim(), cant: 0, ids: [] }; orden.push(k); }
     g[k].ids.push(t[0]);
   });
   return orden.map(function(k){ return g[k]; });
@@ -10747,7 +10746,7 @@ async function aceptarAlertaEscaneo() {
   if (window._busy_ponerTarea) return;
   window._busy_ponerTarea = true;
   try {
-    await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ accion: 'ponerTareas', ids: T.ids }) });
+        await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ accion: 'ponerTareas', ids: T.ids, destino: T.destino }) });
     window._tareasRepPend = (window._tareasRepPend || []).filter(function(t){ return T.ids.indexOf(t[0]) === -1; });
     window._tareaRepActiva = null;
     renderTablaControl();
