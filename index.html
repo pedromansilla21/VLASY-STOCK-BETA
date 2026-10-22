@@ -1785,6 +1785,7 @@
       <div class="page-title">Stock por Ubicación</div>
      <div class="page-sub">Reposición entre Palet, Reserva y Picking</div>
 </div>
+   <select id="su-filtro-estado" onchange="suRenderizar(_suDatos)" style="margin-right:8px;padding:6px 10px;border-radius:6px;background:var(--c-surface2);color:inherit;border:1px solid #3a4060;"><option value="">Todos los estados</option><option value="REPONER URG">REPONER URG</option><option value="POSIBLE FALTANTE">POSIBLE FALTANTE</option><option value="OK">OK</option></select>
 <button class="btn" onclick="suRefresh()" title="Recargar datos"><i class="ti ti-refresh"></i> Actualizar</button>
 </div>
   <div class="card" style="padding:0; overflow:hidden;">
@@ -2984,6 +2985,7 @@ async function suLoad() {
   }
 }
  function suRenderizar(datos) {
+      var _fSel = document.getElementById('su-filtro-estado'); if (_fSel && _fSel.value) { datos = datos.filter(function(d) { return d.estado === _fSel.value; }); }
   var tbody = document.getElementById('tbody-su');
   var emptyEl = document.getElementById('su-empty');
   if (!tbody) return;
