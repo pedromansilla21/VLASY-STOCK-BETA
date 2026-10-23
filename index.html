@@ -2323,6 +2323,14 @@ async function sincronizarEscaneosANube() {
       r.hora || ''
     ];
   });
+     var _gr = {}, _grOrden = [];
+    filas.forEach(function(f) {
+      var k = [f[1], f[2], f[7], f[6], f[8], f[10]].join('|');
+      if (!_gr[k]) { _gr[k] = f.slice(); _gr[k][5] = 0; _grOrden.push(k); }
+      _gr[k][5] += (parseInt(f[5], 10) || 0);
+      _gr[k][11] = f[11];
+    });
+    filas = _grOrden.map(function(k) { return _gr[k]; });
   try {
     await sheetsAppend('ESCANEOS!A:L', filas);
     _registroSincronizadoHasta = registro.length;
