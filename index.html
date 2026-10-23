@@ -4319,7 +4319,7 @@ var incompletas = remito.filter(function(r){ return (r.unidadesControladas || 0)
 
   // Mandar a la nube cualquier escaneo que todavía no se haya sincronizado
   // (por si quedó alguno pendiente del debounce de 1.5s)
-  if (!(remitoDatos.esReposicion && CURRENT_USER && CURRENT_USER.pickingBeta)) {
+    if (true) {v
   await sincronizarEscaneosANube();
 }
 
