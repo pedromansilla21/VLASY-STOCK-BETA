@@ -4281,12 +4281,12 @@ async function finalizarControl() {
       if (r.divisiones && r.divisiones.length > 0) {
         r.divisiones.forEach(function(d, j) {
           if (!d.mes || !d.anio) errores.push('• ' + desc + ' — Parte ' + (j+1) + ': falta la fecha.');
-          if (!d.lote)           errores.push('• ' + desc + ' — Parte ' + (j+1) + ': falta el lote.');
+                   if (!d.lote || /^[-\u2013\u2014\s]+$/.test(String(d.lote))) errores.push('• ' + desc + ' – Parte ' + (j+1) + ': falta el lote.');
           if (!d.tipoFecha)      errores.push('• ' + desc + ' — Parte ' + (j+1) + ': falta el tipo de fecha (Troquelado/Impreso).');
         });
       } else {
-        if (!r.fechaLote)  errores.push('• ' + desc + ': falta la fecha.');
-        if (!r.lote)       errores.push('• ' + desc + ': falta el lote.');
+                 if (!r.fechaLote || /^[-\u2013\u2014\s]+$/.test(String(r.fechaLote))) errores.push('• ' + desc + ': falta la fecha.');
+                if (!r.lote || /^[-\u2013\u2014\s]+$/.test(String(r.lote))) errores.push('• ' + desc + ': falta el lote.');
         if (!r.tipoFecha)  errores.push('• ' + desc + ': falta el tipo de fecha (Troquelado/Impreso).');
       }
     }
