@@ -2280,10 +2280,22 @@ async function sheetsAppend(range, values) {
 // vuelve a mandar las que ya se sincronizaron antes). Se llama una sola vez,
 // al finalizar — para ese momento, el lote/fecha por producto ya está
 // completo (se llenó en "Completar control"), y se sabe quién escaneó.
+// Si ya hay una subida en curso, se espera esa en vez de arrancar otra: dos
+// subidas a la vez mandaban las mismas filas y duplicaban ESCANEOS (P78 22/10).
+var _syncEscaneosEnCurso = null;
 async function sincronizarEscaneosANube() {
+  if (_syncEscaneosEnCurso) return _syncEscaneosEnCurso;
+  _syncEscaneosEnCurso = _sincronizarEscaneosANube();
+  try { return await _syncEscaneosEnCurso; } finally { _syncEscaneosEnCurso = null; }
+}
+
+async function _sincronizarEscaneosANube() {
   if (!remitoDatos.ocId) return;
   if (registro.length <= _registroSincronizadoHasta) return;  // nada nuevo
-  var nuevos = registro.slice(_registroSincronizadoHasta);
+  // Tomar el límite ANTES de enviar: lo que se escanee mientras se envía
+  // queda para la próxima subida (antes se marcaba como enviado sin enviarse)
+  var _hasta = registro.length;
+  var nuevos = registro.slice(_registroSincronizadoHasta, _hasta);
   var operarioReal = (CURRENT_USER ? CURRENT_USER.name : null) || remitoDatos.operario || '—';
   var _cursorDivisiones = {};
   var filas = nuevos.map(function(r) {
@@ -2333,7 +2345,7 @@ async function sincronizarEscaneosANube() {
     filas = _grOrden.map(function(k) { return _gr[k]; });
   try {
     await sheetsAppend('ESCANEOS!A:L', filas);
-    _registroSincronizadoHasta = registro.length;
+    _registroSincronizadoHasta = _hasta;
   } catch(e) {
     // Si falla (sin red, etc.) no se actualiza el contador — se va a
     // reintentar mandar estas mismas filas en el próximo sync.
@@ -3885,6 +3897,7 @@ function abrirPanelCompletarControl() {
   });
 
   var container = document.getElementById('tabla-completar-control');
+  container.dataset.oc = _claveTablaCompletar();  // ver _tablaCompletarEsDeEstaOC()
   if (_filtroCodCompletarControl && !algunaVisible) {
     container.innerHTML = '<div class="card" style="text-align:center; padding:24px; color:var(--c-text3);">No se encontró ese producto en esta O.C.</div>';
   } else {
@@ -4161,7 +4174,21 @@ function cerrarDivisionLinea(i) {
 // Lee fecha/lote/palet de la tabla "Completar control" (si está abierta) y los guarda
 // en cada línea de `remito`. Se usa tanto al finalizar como al volver a escanear,
 // para que nada de lo tipeado se pierda entre sesiones.
+// La tabla de "Completar control" queda dibujada (oculta) después de finalizar.
+// Sus casilleros solo se leen si la tabla se armó para esa misma O.C.: si no,
+// la O.C. siguiente tomaba por posición los lotes/fechas de la anterior
+// (P211 quedó con los lotes del P196, 21/10).
+// El remito manual no tiene ocId: se identifica por número + fecha.
+function _claveTablaCompletar() {
+  return remitoDatos.ocId ? String(remitoDatos.ocId) : ('remito:' + (remitoDatos.nro || '') + '|' + (remitoDatos.fecha || ''));
+}
+function _tablaCompletarEsDeEstaOC() {
+  var c = document.getElementById('tabla-completar-control');
+  return !!c && c.dataset.oc === _claveTablaCompletar();
+}
+
 function _commitCompletarControlValues() {
+  if (!_tablaCompletarEsDeEstaOC()) return;
   remito.forEach(function(r, i) {
     if (r.divisiones && r.divisiones.length > 0) {
       // Línea dividida: leer cada parte por separado, no los campos simples
@@ -4299,6 +4326,23 @@ async function finalizarControl() {
       }
     }
   });
+  // 3. Productos fuera de la O.C. con unidades: también necesitan fecha y lote
+  //    (antes pasaban vacíos y al agregarlos llegaban al historial con "—").
+  if (!remitoDatos.esReposicion) {
+    (itemsFueraOC || []).forEach(function(x) {
+      if ((x.unidadesTotal || 0) <= 0) return;
+      var descF = (x.desc || x.cod) + ' (fuera de OC)';
+      if (x.divisiones && x.divisiones.length > 0) {
+        x.divisiones.forEach(function(d, j) {
+          if (!d.mes || !d.anio) errores.push('• ' + descF + ' — Parte ' + (j+1) + ': falta la fecha.');
+          if (!d.lote || /^[-–—\s]+$/.test(String(d.lote))) errores.push('• ' + descF + ' — Parte ' + (j+1) + ': falta el lote.');
+        });
+      } else {
+        if (!x.fechaLote || /^[-–—\s]+$/.test(String(x.fechaLote))) errores.push('• ' + descF + ': falta la fecha.');
+        if (!x.lote || /^[-–—\s]+$/.test(String(x.lote))) errores.push('• ' + descF + ': falta el lote.');
+      }
+    });
+  }
 
   if (errores.length > 0) {
     alert('No se puede finalizar. Revisá los siguientes campos:\n\n' + errores.join('\n'));
@@ -4317,11 +4361,24 @@ var incompletas = remito.filter(function(r){ return (r.unidadesControladas || 0)
   var ordenes = loadOrdenes();
   var ocIdx = ordenes.findIndex(function(o){ return o.id === id; });
 
+  // Foto del escaneo ANTES de esperar la subida: mientras se espera, otra
+  // llamada a finalizar (el aviso de 60s libera el bloqueo), un cambio de
+  // usuario o la carga de otra OC pueden vaciar remito/remitoDatos. Antes se
+  // guardaba igual la OC vacía y pisaba la buena (P78 22/10).
+  var _datosAlIniciar  = remitoDatos;
+  var _remitoAlIniciar = remito;
+
   // Mandar a la nube cualquier escaneo que todavía no se haya sincronizado
   // (por si quedó alguno pendiente del debounce de 1.5s)
-    if (true) {v
   await sincronizarEscaneosANube();
-}
+
+  if (remitoDatos !== _datosAlIniciar || remito !== _remitoAlIniciar || remito.length === 0) {
+    console.warn('[finalizarControl] El escaneo cambió mientras se subían los escaneos — no se guarda', id);
+    clearTimeout(window._finTimer); window._busy_finalizarControl = false;
+    var _yaGuardada = loadOrdenes().some(function(o){ return o.id === id && o.estadoManual === 'finalizado' && o.lineas && o.lineas.length > 0; });
+    if (!_yaGuardada) showToast('⚠ No se pudo finalizar la O.C. ' + nro + ' — revisá que esté guardada');
+    return;
+  }
 
   var ocObj = {
     id: id,
@@ -5810,7 +5867,9 @@ async function _guardarEnHistorialPalets(oc, escaneadoPor) {
     var fechaHoy = new Date().toLocaleDateString('es-AR');
     // M=CONTROL PALET y N=CONTROL UBICACIÓN: fecha en que el operario COMENZÓ el escaneo
     var fechaControlPalet = remitoDatos.fechaInicioEscaneo || fechaHoy;
-    
+    // El respaldo desde la pantalla solo vale si la tabla es de esta misma O.C.
+    var _usarDOM = !!remitoDatos.ocId && oc.id === remitoDatos.ocId && _tablaCompletarEsDeEstaOC();
+
     // Agrupar líneas: Cod Prod + Lote + Vencimiento + Palet = misma fila
     var filasAgrupadas = {};
     oc.lineas.forEach(function(linea, i) {
@@ -5820,10 +5879,10 @@ async function _guardarEnHistorialPalets(oc, escaneadoPor) {
         linea.divisiones.forEach(function(d, j) {
           // Prioridad: objeto d (ya committeado por _commitCompletarControlValues)
           // DOM como fallback por si la función se llamó antes del commit
-          var cajasEl = document.getElementById('cc-div-' + i + '-' + j + '-cajas');
-          var mesEl   = document.getElementById('cc-div-' + i + '-' + j + '-mes');
-          var anioEl  = document.getElementById('cc-div-' + i + '-' + j + '-anio');
-          var loteEl  = document.getElementById('cc-div-' + i + '-' + j + '-lote');
+          var cajasEl = _usarDOM ? document.getElementById('cc-div-' + i + '-' + j + '-cajas') : null;
+          var mesEl   = _usarDOM ? document.getElementById('cc-div-' + i + '-' + j + '-mes') : null;
+          var anioEl  = _usarDOM ? document.getElementById('cc-div-' + i + '-' + j + '-anio') : null;
+          var loteEl  = _usarDOM ? document.getElementById('cc-div-' + i + '-' + j + '-lote') : null;
 
           var cajasDOM = (cajasEl && cajasEl.value) ? parseInt(cajasEl.value, 10) : 0;
           var upCaja = linea.unidadesPorCaja || linea.cantCaja || 1;
@@ -5866,9 +5925,9 @@ async function _guardarEnHistorialPalets(oc, escaneadoPor) {
 
       // Prioridad: linea object (ya committeado por _commitCompletarControlValues)
       // DOM como fallback por si la función se llamó antes del commit
-      var loteEl = document.getElementById('cc-lote-' + i);
-      var mesEl  = document.getElementById('cc-mes-'  + i);
-      var anioEl = document.getElementById('cc-anio-' + i);
+      var loteEl = _usarDOM ? document.getElementById('cc-lote-' + i) : null;
+      var mesEl  = _usarDOM ? document.getElementById('cc-mes-'  + i) : null;
+      var anioEl = _usarDOM ? document.getElementById('cc-anio-' + i) : null;
 
       var loteOperario = linea.lote || (loteEl && loteEl.value.trim()) || '—';
       var vencimientoOperario = '—';
