@@ -7411,7 +7411,8 @@ function verificarEstadoOperarioRep(filaAlerta) {
     .then(function(r){ return r.json(); })
     .then(function(resp) {
       var val = (resp.ok && resp.data && resp.data[0] && resp.data[0][0]) ? String(resp.data[0][0]).trim() : 'VACIO';
-      if (val === 'VACIO' || val === '') {
+      // FINALIZADO = ya terminó: su celda puede seguir esperando al que envió la tarea
+      if (val === 'VACIO' || val === '' || val.startsWith('FINALIZADO|')) {
         estadoEl.innerHTML = '<span style="color:var(--c-green); font-weight:600;">✓ Disponible</span>';
         _repOperarioOcupado = false;
       } else {
@@ -10751,6 +10752,11 @@ function _checkFinalizadoOC() {
       // que el admin no esté conectado.
       if (!CURRENT_USER || (CURRENT_USER.rol !== 'administrativo' && CURRENT_USER.name !== 'Supervisor Pedidos')) return;
 
+      // Cada alerta es del que envió la tarea: no mostrarla ni limpiarla si es
+      // de otro. Las que no traen nombre (envíos viejos) las ve cualquiera.
+      var enviadoPor = partes[5] || '';
+      if (enviadoPor && enviadoPor !== CURRENT_USER.name) return;
+
       // Limpiar la fila ahora que el admin ya la leyó
       fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ accion: 'setAlerta', valor: 'VACIO', fila: fila }) });
 
@@ -10758,13 +10764,29 @@ function _checkFinalizadoOC() {
       if (vistas.indexOf(val) >= 0) return; // ya se mostró este popup
       vistas.push(val);
       sessionStorage.setItem('_alv_fin', JSON.stringify(vistas));
-      document.getElementById('alerta-finalizado-nro').textContent    = nro ? 'O.C. #' + nro : 'O.C.';
-      document.getElementById('alerta-finalizado-prov').textContent   = prov || '';
-      document.getElementById('alerta-finalizado-estado').textContent = estado === 'completo' ? '✅ Completada sin diferencias' : '⚠ Guardada con diferencias';
-      document.getElementById('alerta-finalizado-estado').style.color = estado === 'completo' ? 'var(--c-green)' : 'var(--c-amber)';
-      document.getElementById('modal-alerta-finalizado').classList.add('open');
+      _colaFinalizados.push({ nro: nro, prov: prov, estado: estado });
     });
+    if (!document.getElementById('modal-alerta-finalizado').classList.contains('open')) _mostrarAlertaFinalizado();
   }).catch(function(){}).finally(function(){ _busy_checkFinalizadoOC = false; });
+}
+
+// Si terminaron varias tareas a la vez se muestran de a una, sin perder ninguna.
+var _colaFinalizados = [];
+function _mostrarAlertaFinalizado() {
+  var a = _colaFinalizados.shift();
+  if (!a) return;
+  document.getElementById('alerta-finalizado-nro').textContent    = a.nro ? 'O.C. #' + a.nro : 'O.C.';
+  document.getElementById('alerta-finalizado-prov').textContent   = a.prov || '';
+  document.getElementById('alerta-finalizado-estado').textContent = a.estado === 'completo' ? '✅ Completada sin diferencias' : '⚠ Guardada con diferencias';
+  document.getElementById('alerta-finalizado-estado').style.color = a.estado === 'completo' ? 'var(--c-green)' : 'var(--c-amber)';
+  document.getElementById('btn-alerta-finalizado').textContent = _colaFinalizados.length > 0 ? 'Siguiente (faltan ' + _colaFinalizados.length + ')' : 'Ver en Reporte';
+  document.getElementById('modal-alerta-finalizado').classList.add('open');
+}
+function _cerrarAlertaFinalizado() {
+  if (_colaFinalizados.length > 0) { _mostrarAlertaFinalizado(); return; }
+  document.getElementById('modal-alerta-finalizado').classList.remove('open');
+  switchPanel('ordenes');
+  renderOrdenes();
 }
 
 var _busy_limpiarAlertaHuerfana = false;
@@ -10938,7 +10960,7 @@ async function aceptarAlertaEscaneo() {
     <div class="modal-title" style="margin-bottom:6px;" id="alerta-finalizado-nro">O.C. finalizada</div>
     <div style="font-size:14px; color:var(--c-text2); margin-bottom:8px;" id="alerta-finalizado-prov"></div>
     <div style="font-size:15px; font-weight:600; margin-bottom:24px;" id="alerta-finalizado-estado"></div>
-    <button class="btn btn-primary" style="width:100%;" onclick="document.getElementById('modal-alerta-finalizado').classList.remove('open'); switchPanel('ordenes'); renderOrdenes();">
+    <button class="btn btn-primary" id="btn-alerta-finalizado" style="width:100%;" onclick="_cerrarAlertaFinalizado();">
       Ver en Reporte
     </button>
   </div>
