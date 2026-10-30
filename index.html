@@ -4400,6 +4400,7 @@ var incompletas = remito.filter(function(r){ return (r.unidadesControladas || 0)
     esPalet:         !!(document.getElementById('rem-es-palet') && document.getElementById('rem-es-palet').checked),
     esReposicion:    !!(remitoDatos.esReposicion),
     paletOriginalId: remitoDatos.paletOriginalId || null,
+    enviadoPor:      remitoDatos.enviadoPor || '',
     ubicacion:       remitoDatos.ubicacion || (document.getElementById('rem-ubicacion') ? document.getElementById('rem-ubicacion').value.trim() : '—') || '—',
     lineas:          JSON.parse(JSON.stringify(remito)),
     // El detalle de escaneos (registro) ya no viaja en esta celda — se
@@ -4511,7 +4512,7 @@ var incompletas = remito.filter(function(r){ return (r.unidadesControladas || 0)
    clearTimeout(window._finTimer);
   fetch(GAS_URL, {
     method: 'POST', mode: 'no-cors',
-    body: JSON.stringify({ accion: 'setAlerta', valor: 'FINALIZADO|' + nro + '|' + (ocObj.proveedor||'') + '|' + (todoCompleto ? 'completo' : 'con diferencias') + '|' + Date.now(), fila: filaParaFinalizar })
+    body: JSON.stringify({ accion: 'setAlerta', valor: 'FINALIZADO|' + nro + '|' + (ocObj.proveedor||'') + '|' + (todoCompleto ? 'completo' : 'con diferencias') + '|' + Date.now() + '|' + (ocObj.enviadoPor||''), fila: filaParaFinalizar })
   });
   // Si el admin no tiene el sistema abierto, la celda quedaría en FINALIZADO
   // bloqueando el slot para siempre. Después de 2 minutos, el operario la
@@ -4596,6 +4597,7 @@ var diff = remito.filter(function(r){ return (r.unidadesControladas || 0) > 0 &&
       if (idx >= 0 && ordenes[idx].estadoManual !== 'finalizado') {
         ordenes[idx].lineas       = JSON.parse(JSON.stringify(remito));
         ordenes[idx].itemsFueraOC = JSON.parse(JSON.stringify(itemsFueraOC));
+        if (remitoDatos.enviadoPor) ordenes[idx].enviadoPor = remitoDatos.enviadoPor;
         ordenes[idx].savedAt      = new Date().toISOString();
         saveOrdenes(ordenes);
         updateBadgeOrdenes();
@@ -7565,7 +7567,7 @@ async function enviarReposicion() {
 
   // Primero guardar la OC en el Sheet, LUEGO mandar la alerta al operario
   _saveOrdenesToSheets(ordenes).then(function() {
-    var valorAlerta = repId + '|' + repOC.proveedor + '|' + repOC.nro + '|' + _getDeviceId() + '|' + Date.now();
+    var valorAlerta = repId + '|' + repOC.proveedor + '|' + repOC.nro + '|' + _getDeviceId() + '|' + Date.now() + '|' + (CURRENT_USER ? CURRENT_USER.name : '');
     fetch(GAS_URL, {
       method: 'POST',
       mode: 'no-cors',
@@ -7575,7 +7577,7 @@ async function enviarReposicion() {
   }).catch(function() {
     // Si falla el save, mandar la alerta igual después de un delay
     setTimeout(function() {
-      var valorAlerta = repId + '|' + repOC.proveedor + '|' + repOC.nro + '|' + _getDeviceId() + '|' + Date.now();
+      var valorAlerta = repId + '|' + repOC.proveedor + '|' + repOC.nro + '|' + _getDeviceId() + '|' + Date.now() + '|' + (CURRENT_USER ? CURRENT_USER.name : '');
       fetch(GAS_URL, {
         method: 'POST',
         mode: 'no-cors',
@@ -7665,7 +7667,7 @@ async function _verificarYEnviar(ocId, filaAlerta) {
 }
 
 
-async function _ejecutarEnvioEscaneo(ocId, filaAlerta) {
+async function _ejecutarEnvioEscaneo(ocId, filaAlerta, enviadoPor) {
   if (CURRENT_USER && CURRENT_USER.rol === 'administrativo') {
     showToast('🔄 Preparando envío...');
     await syncOrdenes();
@@ -7688,7 +7690,7 @@ async function _ejecutarEnvioEscaneo(ocId, filaAlerta) {
       method: 'POST', mode: 'no-cors',
       body: JSON.stringify({
         accion: 'setAlerta',
-        valor: oc.id + '|' + (oc.proveedor||'') + '|' + (oc.nro||'') + '|' + _getDeviceId() + '|' + Date.now(),
+        valor: oc.id + '|' + (oc.proveedor||'') + '|' + (oc.nro||'') + '|' + _getDeviceId() + '|' + Date.now() + '|' + CURRENT_USER.name,
         fila: filaAlerta
       })
     });
@@ -7710,6 +7712,7 @@ async function _ejecutarEnvioEscaneo(ocId, filaAlerta) {
     operario: oc.responsable, obs: oc.obs, nroProv: oc.nroProv || '',
     esReposicion: oc.esReposicion || false,
     paletOriginalId: oc.paletOriginalId || null,
+    enviadoPor: enviadoPor || oc.enviadoPor || '',
     ubicacion: oc.ubicacion || '—',
     fechaInicioEscaneo: new Date().toLocaleDateString('es-AR', {day:'2-digit', month:'2-digit', year:'numeric'})
   };
@@ -8513,6 +8516,7 @@ function saveSession() {
     // crea otra de cero ya "finalizada").
     mergedDatos.ocId    = remitoDatos.ocId || '';
     mergedDatos.nroProv = remitoDatos.nroProv || '';
+    mergedDatos.enviadoPor = remitoDatos.enviadoPor || '';
     var esPalet = document.getElementById('rem-es-palet') ? document.getElementById('rem-es-palet').checked : false;
     var payload = {
       usuario: CURRENT_USER ? CURRENT_USER.name : '',
@@ -10702,6 +10706,7 @@ document.getElementById('modal-agregar-fuera-oc').addEventListener('click', func
 
 <script>
 var _alertaEscaneoOcId = null;
+var _alertaEscaneoEnviadoPor = '';
 
 function _getDeviceId() {
   var k = 'sc_device_id';
@@ -10852,6 +10857,7 @@ function _checkAlertaEscaneo(_rowsPreload) {
     sessionStorage.setItem('_alv', JSON.stringify(vistas));
     _alertaEscaneoOcId = ocId;
     _alertaEscaneoFila = fila; // guardar para usarla al aceptar
+    _alertaEscaneoEnviadoPor = partes[5] || '';
     var nro  = partes[2] || (pendiente.nro || '');
     var prov = partes[1] || (pendiente.proveedor || '');
     document.getElementById('alerta-escaneo-titulo').textContent = nro ? 'O.C. #' + nro + ' lista' : 'O.C. lista para escanear';
@@ -10870,6 +10876,7 @@ async function aceptarAlertaEscaneo() {
   if (!_alertaEscaneoOcId) return;
   var fila = _alertaEscaneoFila || (CURRENT_USER && CURRENT_USER.filaAlerta) || 1;
   var ocId = _alertaEscaneoOcId;
+  var enviadoPor = _alertaEscaneoEnviadoPor;
   _alertaEscaneoOcId = null;
 
   fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ accion: 'setAlerta', valor: 'EN_ESCANEO|' + ocId, fila: fila }) });
@@ -10880,13 +10887,13 @@ async function aceptarAlertaEscaneo() {
 
   if (ocLocal) {
     // Encontrada localmente — cargar YA sin esperar sync
-    _ejecutarEnvioEscaneo(ocId);
+    _ejecutarEnvioEscaneo(ocId, fila, enviadoPor);
     switchPanel('scanner');
   } else {
     // No está localmente — sincronizar y después cargar
     showToast('Cargando O.C...');
     try { await syncOrdenes(); } catch(e) {}
-    _ejecutarEnvioEscaneo(ocId);
+    _ejecutarEnvioEscaneo(ocId, fila, enviadoPor);
     switchPanel('scanner');
   }
 }
