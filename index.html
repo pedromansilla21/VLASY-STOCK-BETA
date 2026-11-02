@@ -4335,8 +4335,13 @@ async function finalizarControl() {
 
   // ── Validaciones antes de guardar ────────────────────────────────────────
   var errores = [];
+  var _esRepFin = remitoDatos.esReposicion || String(remitoDatos.nro || '').indexOf('REP-') === 0;
   remito.forEach(function(r) {
     var desc = r.desc || r.cod;
+    // Reposición: tiene que dar exacto lo pedido, ni más ni menos
+    if (_esRepFin && (r.unidadesControladas || 0) !== _uEspBase(r)) {
+      errores.push('• ' + desc + ': se pidieron ' + _uEspBase(r) + ' u. y hay ' + (r.unidadesControladas || 0) + ' u. Tiene que dar exacto.');
+    }
     // 1. Líneas divididas: la suma de cajas de las partes debe ser exactamente
     //    igual al total escaneado — ni más ni menos.
     if (r.divisiones && r.divisiones.length > 0) {
