@@ -2913,6 +2913,15 @@ async function suAbrirReponer(cod) {
       if (accion === 'ENTRADA') mapa[clave].cant += cant;
       if (accion === 'SALIDA') mapa[clave].cant -= cant;
     });
+    // Lo que ya tomó otra tarea sin retirar no está disponible
+    var _tarAb = await sheetsRead('TAREAS REPOSICION!A2:J');
+    (_tarAb || []).forEach(function(t) {
+      if (String(t[9]).trim() !== 'PENDIENTE' || String(t[2]).trim() !== cod) return;
+      Object.keys(mapa).forEach(function(k) {
+        var m = mapa[k];
+        if (m.ubi === String(t[6]).trim() && m.lote === String(t[3]).trim()) m.cant -= parseInt(t[5], 10) || 0;
+      });
+    });
     var lotes = Object.keys(mapa).map(function(k){ return mapa[k]; })
       .filter(function(l){ return l.cant > 0; });
        if (!lotes.length) {
@@ -2925,7 +2934,7 @@ async function suAbrirReponer(cod) {
       return '<tr data-ubi="' + l.ubi + '"><td>' + l.cant + '</td><td>' + l.fecha + '</td><td>' + l.lote +
         '</td><td><input type="number" min="0" max="' + l.cant + '" value="0" style="width:70px;"></td></tr>';
     }).join('');
-       document.getElementById('rp-operario').innerHTML = loadUsers().map(function(u) {
+       document.getElementById('rp-operario').innerHTML = loadUsers().filter(function(u){ return u.rol === 'operario' && u.filaAlerta; }).map(function(u) {
       return '<option value="' + u.name + '">' + u.name + '</option>';
     }).join('');
     document.getElementById('modal-reponer-ubicacion').classList.add('open');
@@ -2938,10 +2947,19 @@ async function suAbrirReponer(cod) {
   document.getElementById('modal-reponer-ubicacion').classList.remove('open');
 }
  async function suCrearTarea() {
+  if (window._busy_suCrear) return;
+  window._busy_suCrear = true;
+  try { await _suCrearTarea(); } finally { window._busy_suCrear = false; }
+}
+ async function _suCrearTarea() {
   var cod = document.getElementById('rp-cod').textContent;
   var operario = document.getElementById('rp-operario').value;
   var filas = document.querySelectorAll('#rp-lotes tr');
   var n = 0;
+  for (var v = 0; v < filas.length; v++) {
+    var _inp = filas[v].querySelector('input');
+    if ((parseInt(_inp.value, 10) || 0) > (parseInt(_inp.max, 10) || 0)) { showToast('⛔ Hay ' + _inp.max + ' u. disponibles en ese lote'); return; }
+  }
   for (var i = 0; i < filas.length; i++) {
     var tds = filas[i].querySelectorAll('td');
     var cant = parseInt(tds[3].querySelector('input').value, 10) || 0;
@@ -3471,6 +3489,45 @@ function _parsearCodigoRack(codigo) {
   return { cod: cod, rack: rack, tipo: tipoLimpio };
 }
 
+// ── Lo que falta ubicar queda en esta tablet hasta confirmar que se grabó ───
+var PENDING_RACK_KEY = 'BETA_sc_pending_rack';
+function _leerRack() { try { return JSON.parse(localStorage.getItem(PENDING_RACK_KEY) || '[]'); } catch(e) { return []; } }
+function _grabarRack(l) { try { localStorage.setItem(PENDING_RACK_KEY, JSON.stringify(l)); } catch(e) {} }
+function _guardarRackPendiente(oc) {
+  var l = _leerRack().filter(function(p){ return p.ocId !== oc.id; });
+  l.push({ ocId: oc.id, palet: oc.palet, lineas: oc.lineas, movId: 'UBI_' + oc.id });
+  _grabarRack(l);
+}
+async function _enviarRack(p) {
+  try {
+    await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ accion: 'ubicarLineas', movId: p.movId, ocId: p.ocId, palet: p.palet, filas: p.filas, operario: (CURRENT_USER && CURRENT_USER.name) || '' }) });
+    var r = await (await fetch(GAS_URL + '?accion=movAplicado&id=' + encodeURIComponent(p.movId), { cache: 'no-store' })).json();
+    if (r.ok && r.data === true) {
+      _grabarRack(_leerRack().filter(function(x){ return x.ocId !== p.ocId; }));
+      showToast('✅ Reposición ubicada en el rack');
+      return true;
+    }
+  } catch(e) { console.error('Error al ubicar', e); }
+  showToast('⚠ No se confirmó la ubicación. Queda pendiente y se reintenta al entrar');
+  return false;
+}
+function _ubicarRack(ocId, palet, filas) {
+  var l = _leerRack();
+  var p = l.find(function(x){ return x.ocId === ocId; });
+  if (!p) { p = { ocId: ocId, palet: palet, movId: 'UBI_' + ocId }; l.push(p); }
+  p.filas = filas;
+  _grabarRack(l);
+  return _enviarRack(p);
+}
+async function _checkPendingRack() {
+  var l = _leerRack();
+  for (var i = 0; i < l.length; i++) { if (l[i].filas) await _enviarRack(l[i]); }
+  var abierto = _leerRack().find(function(p){ return !p.filas; });
+  if (abierto && !document.getElementById('picking-beta-overlay')) {
+    mostrarPanelConfirmacionRack({ id: abierto.ocId, palet: abierto.palet, lineas: abierto.lineas });
+  }
+}
+
 function mostrarPanelConfirmacionRack(ocObj) {
   // Preparar líneas a confirmar (solo las que tienen unidades)
   var lineasPendientes = (ocObj.lineas || []).filter(function(l) {
@@ -3496,6 +3553,7 @@ function mostrarPanelConfirmacionRack(ocObj) {
     return;
   }
 
+  _guardarRackPendiente(ocObj);
   var _idx = 0;   // índice de línea actual
   var _fase = 'rack'; // 'rack' o 'cajas'
 
@@ -3546,7 +3604,6 @@ function mostrarPanelConfirmacionRack(ocObj) {
           '<input id="picking-beta-scan" type="text" autocomplete="off" placeholder="Esperando escaneo..." ' +
             'style="width:100%;background:#0d1117;border:1.5px solid ' + colorUbi + ';border-radius:8px;padding:10px 12px;color:#e6edf3;font-size:14px;font-family:monospace;margin-bottom:12px;box-sizing:border-box;">' +
           '<div style="display:flex;gap:8px;">' +
-            '<button id="picking-beta-cancelar" style="flex:1;background:rgba(248,113,113,0.1);color:#f87171;border:1.5px solid #f87171;border-radius:8px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;">✗ Cancelar</button>' +
             (_fase === 'cajas' && linea.cajasConfirmadas === linea.cajasEsperadas
               ? '<button id="picking-beta-siguiente" style="flex:2;background:#4CAF7D;color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;">Confirmar y continuar →</button>'
               : '') +
@@ -3561,15 +3618,8 @@ function mostrarPanelConfirmacionRack(ocObj) {
       if (inp) inp.focus();
     }, 80);
 
-    // Cancelar → aborta todo
-    var btnCancel = document.getElementById('picking-beta-cancelar');
-    if (btnCancel) btnCancel.addEventListener('click', function() {
-      overlay.remove();
-      window._pickingBetaConfirmado = false;
-      window._pickingBetaLineas = null;
-      window._pickingBetaOcObj = null;
-      showToast('Cancelado — la baja del palet ya se hizo, falta ubicar en el rack');
-    });
+    // Sin Cancelar: ubicar es obligatorio. El palet ya descontó; si se cierra la
+    // pestaña, el panel vuelve a salir al entrar (_checkPendingRack).
 
     // Siguiente → avanza a siguiente línea o finaliza
     var btnSig = document.getElementById('picking-beta-siguiente');
@@ -3614,6 +3664,10 @@ function mostrarPanelConfirmacionRack(ocObj) {
           showToast('⚠ Ese rack corresponde al artículo ' + codArticuloRack + ', no a ' + linea.cod + '. Buscá la posición correcta.');
           return;
         }
+        if (tipoLimpio === 'PICKING') {
+          var _hayReserva = (rows || []).some(function(r){ return String(r[0] || '').trim() === codArticuloRack && /REPOSICION$/i.test(String(r[12] || '').trim()); });
+          if (_hayReserva) { showToast('⛔ ' + linea.cod + ' tiene reserva: va a la reserva, no al picking'); return; }
+        }
         linea.tipoUbicacion = tipoLimpio;
          linea.codUbi = codigoEsc;
         _fase = 'cajas';
@@ -3623,7 +3677,11 @@ function mostrarPanelConfirmacionRack(ocObj) {
         showToast('⚠ Error al leer STOCK POR UBICACION. Intentá de nuevo.');
       });
     } else {
-      // Fase cajas: cualquier escaneo suma una caja
+      // Fase cajas: solo cuenta el artículo de esta línea y nunca pasa lo esperado
+      var _cCaja = codigo.trim();
+      var artCaja = (db || []).find(function(a){ return String(a.cbCaja).trim() === _cCaja || String(a.cbSuelto).trim() === _cCaja || String(a.cod).trim() === _cCaja; });
+      if (!artCaja || String(artCaja.cod).trim() !== String(linea.cod).trim()) { showToast('⛔ Ese código no es de ' + linea.cod); return; }
+      if (linea.cajasConfirmadas >= linea.cajasEsperadas) { showToast('Ya están todas las cajas. Tocá Confirmar y continuar'); return; }
       linea.cajasConfirmadas++;
       if (linea.cajasConfirmadas >= linea.cajasEsperadas) {
         showToast('✅ ' + linea.cajasEsperadas + ' cajas confirmadas');
@@ -3641,24 +3699,14 @@ function mostrarPanelConfirmacionRack(ocObj) {
     if (_idx >= lineasPendientes.length) {
       // Todas confirmadas → guardar y finalizar
       overlay.remove();
-      window._pickingBetaConfirmado = true;
-      window._pickingBetaLineas = lineasPendientes;
-           lineasPendientes.forEach(function(l) {
-        if (!l.codUbi || !(l.cant > 0)) return;
-        fetch(GAS_URL, { method: 'POST', mode: 'no-cors',
-          body: JSON.stringify({ accion: 'sumarStockUbicacion', codigo: l.codUbi, cant: l.cant,
-            movId: 'SU_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) }) });
-      });
-            var _filasUbi = lineasPendientes.map(function(l) {
+      var _filasUbi = lineasPendientes.map(function(l) {
         return [l.cod || '—', l.desc || '—', l.categoria || '—', l.marca || '—',
                                 l.cant || 0, l.fecha || '—', l.lote || '—', l.codUbi || '—', l.tipoUbicacion || 'PICKING', 'ENTRADA'];
       });
-      fetch(GAS_URL, { method: 'POST', mode: 'no-cors',
-     body: JSON.stringify({ accion: 'guardarRegistroUbicacion', filas: _filasUbi }) });
+      _ubicarRack(ocObj.id, ocObj.palet, _filasUbi);
       window._pickingBetaLineas = null;
       window._pickingBetaConfirmado = false;
       window._pickingBetaOcObj = null;
-      showToast('✅ Reposición ubicada en el rack');
     } else {
       renderModal();
     }
@@ -3831,7 +3879,7 @@ function borrarLineaControl(i) {
 var _filtroCodCompletarControl = null;
 
 function abrirPanelCompletarControl() {
-        if (window._tareaRepActiva && window._tareaRepActiva.hecha) { if (window._tareaRepActiva.estado === 'RETIRADA' && typeof ponerTarea === 'function') { ponerTarea(); return; } if (typeof _abrirVerifTarea === 'function') { _abrirVerifTarea(); return; } }
+        if (remito.length === 0 && window._tareaRepActiva && window._tareaRepActiva.hecha) { if (window._tareaRepActiva.estado === 'RETIRADA' && typeof ponerTarea === 'function') { ponerTarea(); return; } if (typeof _abrirVerifTarea === 'function') { _abrirVerifTarea(); return; } }
   if (remito.length === 0) { showToast('No hay escaneo activo'); return; }
   // Renderizar tabla con fecha, lote, palet por línea
   // (si hay un filtro activo por búsqueda/escaneo, se omiten las líneas que
@@ -4773,7 +4821,7 @@ function processScan() {
   var raw = document.getElementById('scan-input').value.trim();
   document.getElementById('scan-input').value = '';
   if (!raw) return;
- if (window._tareasRepPend && window._tareasRepPend.length || window._tareaRepActiva) { if (_procesarScanTarea(raw)) return; }
+ if (remito.length === 0 && (window._tareasRepPend && window._tareasRepPend.length || window._tareaRepActiva)) { if (_procesarScanTarea(raw)) return; }
   if (window._lectorEscaneoReciente) window._lectorEscaneoReciente();
 
   var al = document.getElementById('alert-scan');
@@ -5733,18 +5781,10 @@ async function _guardarEnHistorial(oc, escaneadoPor) {
         });
         var _finRepId = 'FRP_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
         _savePendingFinRep(_finRepId, oc.id, oc.palet, _finRepLineas, (CURRENT_USER && CURRENT_USER.name) || '');
-        fetch(GAS_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-                body: JSON.stringify({ accion: 'finalizarReposicion', ocId: oc.id, palet: oc.palet, operario: (CURRENT_USER && CURRENT_USER.name) || '',
-            lineas: (oc.lineas || []).map(function(l) {
-              return { cod: l.cod, lote: l.lote || '—', cantRestar: l.unidadesControladas || 0 };
-            })
-          })
-        }).then(function() {
-          _markFinRepSent(_finRepId);
-          setTimeout(function() { _clearFinRep(_finRepId); }, 60000);
-        }).catch(function() { /* queda pending, se reintenta al próximo login */ });
+        _postFinRep(_finRepId, oc.id, oc.palet, _finRepLineas, (CURRENT_USER && CURRENT_USER.name) || '').catch(function() {
+          // GAS ocupado o sin red: queda pending. Un reintento acá y, si no, al próximo login
+          setTimeout(_checkAndRetryPendingFinRep, 45000);
+        });
 
         // ── PICKING BETA: escribir en ESCANEO UBICACIONES ──────────────────
         if (CURRENT_USER && CURRENT_USER.pickingBeta && window._pickingBetaLineas && window._pickingBetaLineas.length > 0) {
@@ -5804,8 +5844,33 @@ function _clearFinRep(id) {
     localStorage.setItem(PENDING_FINREP_KEY, JSON.stringify(pending));
   } catch(e) {}
 }
+// Mismo POST de siempre, pero sin no-cors para leer la respuesta: rechaza si el
+// GAS contesta error (ej. "lock ocupado"). Repetirlo no descuenta dos veces.
+async function _postFinRep(id, ocId, palet, lineas, operario) {
+  var resp = await fetch(GAS_URL, {
+    method: 'POST',
+    body: JSON.stringify({ accion: 'finalizarReposicion', ocId: ocId, palet: palet, operario: operario, lineas: lineas || [] })
+  });
+  var data = await resp.json();
+  if (!data.ok) throw new Error(data.error || 'GAS rechazó el descuento');
+  _markFinRepSent(id);
+  setTimeout(function() { _clearFinRep(id); }, 60000);
+}
+// Tras 3 intentos fallidos deja de reintentar, avisa y deja fila en LOG DESCUENTOS
+async function _finRepFallida(p) {
+  var lista = JSON.parse(localStorage.getItem(PENDING_FINREP_KEY) || '[]');
+  var item = lista.find(function(x) { return x.id === p.id; });
+  if (!item) return;
+  item.intentos = (item.intentos || 0) + 1;
+  localStorage.setItem(PENDING_FINREP_KEY, JSON.stringify(lista));
+  if (item.intentos < 3) return;
+  try { await sheetsAppend('LOG DESCUENTOS!A:K', [[new Date().toLocaleString('es-AR'), String(p.ocId), '', String(p.palet), '', '', '', '', 'NO CONFIRMADO', 'Descuento de reposición sin confirmar tras 3 intentos: revisar a mano', p.operario || '']]); } catch(e) { return; }
+  _clearFinRep(p.id);
+  alert('No se pudo confirmar el descuento del palet ' + p.palet + '.\n\nAvisá a un supervisor para revisarlo en LOG DESCUENTOS.');
+}
 async function _checkAndRetryPendingFinRep() {
   try {
+    if (!navigator.onLine) return;
     var pending = JSON.parse(localStorage.getItem(PENDING_FINREP_KEY) || '[]');
     var now = Date.now();
     pending = pending.filter(function(p) {
@@ -5816,16 +5881,13 @@ async function _checkAndRetryPendingFinRep() {
     var toRetry = pending.filter(function(p) { return p.status === 'pending'; });
     if (toRetry.length === 0) return;
     showToast('⚠ Hay ' + toRetry.length + ' descuento(s) de reposición pendiente(s) — reintentando...');
+    var _reenviados = 0;
     for (var i = 0; i < toRetry.length; i++) {
       var p = toRetry[i];
       try {
-        await fetch(GAS_URL, {
-          method: 'POST', mode: 'no-cors',
-          body: JSON.stringify({ accion: 'finalizarReposicion', ocId: p.ocId, palet: p.palet, operario: p.operario || (CURRENT_USER && CURRENT_USER.name) || '', lineas: p.lineas || [] })
-        });
-        _markFinRepSent(p.id);
-        (function(pid) { setTimeout(function() { _clearFinRep(pid); }, 60000); })(p.id);
-      } catch(e) { /* queda como pending */ }
+        await _postFinRep(p.id, p.ocId, p.palet, p.lineas, p.operario || (CURRENT_USER && CURRENT_USER.name) || '');
+        _reenviados++;
+      } catch(e) { await _finRepFallida(p); /* si no llegó a 3 intentos queda como pending */ }
     }
    async function _checkAndRetryPendingHistorial() {
   try {
@@ -5849,7 +5911,7 @@ async function _checkAndRetryPendingFinRep() {
     });
   } catch(e) {}
 }
-    if (toRetry.length > 0) showToast('✅ Descuentos de reposición reenviados al servidor');
+    if (_reenviados > 0) showToast('✅ Descuentos de reposición reenviados al servidor');
   } catch(e) {}
 }
 
@@ -9409,6 +9471,7 @@ function _completarLogin(selected) {
   }
   iniciarSincAlertasOperario();  
   setTimeout(_checkAndRetryPendingPalets, 6000); // palets sin confirmar de esta PC/tablet (todos los roles)
+  setTimeout(_checkPendingRack, 6500); // lo que falta ubicar en esta tablet
   aplicarRol(CURRENT_USER.rol);
 }
 
@@ -9671,6 +9734,9 @@ function _procesarScanTarea(raw) {
     var grupos = _tareasAgrupadas();
       var g = grupos.find(function(x){ return (x.estado === 'RETIRADA' ? x.destino : x.origen) === raw; });
     if (!g) return false;
+    // Mercadería retirada sin ubicar: primero hay que ponerla, antes de otra tarea
+    var gRet = grupos.find(function(x){ return x.estado === 'RETIRADA'; });
+    if (gRet && g.estado !== 'RETIRADA') { showToast('⚠ Primero dejá lo que retiraste en ' + gRet.destino); return true; }
     window._tareaRepActiva = {
       ids: g.ids, cod: g.cod, lote: g.lote, fechaLote: g.fechaLote,
                     cant: g.cant, estado: g.estado, ubiOrigen: (g.estado === 'RETIRADA' ? g.destino : g.origen), destino: g.destino, ubiOk: true, escaneadas: 0, hecha: false
@@ -11115,6 +11181,12 @@ async function aceptarAlertaEscaneo() {
 </div>
 
 <script>
+ async function _tareaEnHoja(ids, esperado) {
+  var rows = await sheetsRead('TAREAS REPOSICION!A2:J');
+  return ids.every(function(id){
+    return (rows || []).some(function(r){ return String(r[0]) === String(id) && String(r[9]).trim() === esperado; });
+  });
+}
  async function ponerTarea() {
   var T = window._tareaRepActiva;
   if (!T || !T.hecha || T.estado !== 'RETIRADA') return;
@@ -11122,6 +11194,7 @@ async function aceptarAlertaEscaneo() {
   window._busy_ponerTarea = true;
   try {
         await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ accion: 'ponerTareas', ids: T.ids, destino: T.destino }) });
+    if (!(await _tareaEnHoja(T.ids, 'HECHA'))) { alert('No se pudo guardar en el picking. La tarea sigue abierta: probá de nuevo o avisá al supervisor.'); return; }
     window._tareasRepPend = (window._tareasRepPend || []).filter(function(t){ return T.ids.indexOf(t[0]) === -1; });
     window._tareaRepActiva = null;
     renderTablaControl();
@@ -11169,8 +11242,10 @@ function _confirmarVerifTarea() {
   var aa = document.getElementById('vt-aa').value.trim();
   var lote = document.getElementById('vt-lote').value.trim();
   if (!mm || !aa || !lote) { showToast('Completá fecha y lote'); return; }
-  var fechaOk = !String(T.fechaLote || '').trim() || _normFechaVerif(('0' + mm).slice(-2) + '/' + aa) === _normFechaVerif(T.fechaLote);
-  var loteOk = lote.toUpperCase() === String(T.lote).trim().toUpperCase();
+  var _fEsp = String(T.fechaLote || '').trim();
+  var fechaOk = !_fEsp || /^[\/\-–—\s]+$/.test(_fEsp) || _normFechaVerif(('0' + mm).slice(-2) + '/' + aa) === _normFechaVerif(T.fechaLote);
+  function _nl(v) { v = String(v || '').trim().toUpperCase(); return /^\d+$/.test(v) ? String(parseInt(v, 10)) : v; }
+  var loteOk = _nl(lote) === _nl(T.lote);
   if (!fechaOk || !loteOk) { showToast('⛔ Lote o fecha no coinciden con la tarea. Revisá la mercadería'); return; }
   document.getElementById('modal-verif-tarea').remove();
   finalizarTarea();
@@ -11182,6 +11257,7 @@ function _confirmarVerifTarea() {
   window._busy_finTarea = true;
   try {
     await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ accion: 'retirarTareas', ids: T.ids }) });
+    if (!(await _tareaEnHoja(T.ids, 'RETIRADA'))) { alert('No se pudo retirar de la reserva. No muevas la mercadería: probá de nuevo o avisá al supervisor.'); return; }
        (window._tareasRepPend || []).forEach(function(t){ if (T.ids.indexOf(t[0]) !== -1) t[9] = 'RETIRADA'; });
     window._tareaRepActiva = null;
     renderTablaControl();
@@ -11193,7 +11269,7 @@ function _confirmarVerifTarea() {
   }
 }
 function pedirEscaneadoPor() {
-    if (window._tareaRepActiva && window._tareaRepActiva.hecha) { if (window._tareaRepActiva.estado === 'RETIRADA' && typeof ponerTarea === 'function') { ponerTarea(); return; } if (typeof _abrirVerifTarea === 'function') { _abrirVerifTarea(); return; } }
+    if (remito.length === 0 && window._tareaRepActiva && window._tareaRepActiva.hecha) { if (window._tareaRepActiva.estado === 'RETIRADA' && typeof ponerTarea === 'function') { ponerTarea(); return; } if (typeof _abrirVerifTarea === 'function') { _abrirVerifTarea(); return; } }
   var inp = document.getElementById('input-escaneado-por');
   if (inp) {
     inp.value = CURRENT_USER ? CURRENT_USER.name : '';
