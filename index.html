@@ -3859,7 +3859,22 @@ function confirmarEdicionManual(idx) {
   if (isNaN(val) || val < 0) { showToast('⚠ Ingresá una cantidad válida'); return; }
   var r = remito[idx];
   if (!r) return;
+  var _antesEd = r.unidadesControladas || 0;
   r.unidadesControladas = val;
+  // Dejar la diferencia en el registro para que ESCANEOS dé lo real
+  // (antes quedaba solo lo escaneado: P52 755 = 1 en vez de 540)
+  if (val !== _antesEd) {
+    registro.push({
+      cb: 'EDICION', cod: r.cod, desc: r.desc, unidadesXCaja: r.cantCaja,
+      fecha: remitoDatos.fecha || new Date().toISOString().split('T')[0],
+      lote: remitoDatos.lote || '—', palet: remitoDatos.palet || '—',
+      contenedor: remitoDatos.contenedor || '—',
+      operario: (CURRENT_USER ? CURRENT_USER.name : null) || remitoDatos.operario || '—',
+      hora: new Date().toLocaleString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'}),
+      idxLinea: idx, correccion: true, cantidad: val - _antesEd
+    });
+    renderRegistro();
+  }
   _edicionManualPendiente = null;
   _edicionManualAprobada  = false;
   _actualizarEstadoEdicion(idx, 'hidden');
