@@ -9639,6 +9639,10 @@ function loginIngresar() {
 }
 
 function _completarLogin(selected) {
+  // Cambio de usuario en la misma tablet: liberar al anterior en USUARIOS col E
+  if (CURRENT_USER && CURRENT_USER.name && CURRENT_USER.name !== selected.name) {
+    _liberarSesionActiva(CURRENT_USER.name).catch(function(){});
+  }
   CURRENT_USER = {
     name: selected.name,
     rol: selected.rol || 'operario',
