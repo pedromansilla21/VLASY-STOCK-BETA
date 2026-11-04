@@ -7950,9 +7950,13 @@ async function enviarReposicion() {
         lineaRep.cantCaja            = upCaja;
         // Guardar lote/fecha de esta división específica
         lineaRep.lote     = div.lote || '—';
+        lineaRep.loteEnviado = div.lote || '—';  // lote pedido: no se puede cambiar al finalizar
         lineaRep.mes      = div.mes  || '';
         lineaRep.anio     = div.anio || '';
-        lineaRep.fechaLote = (div.mes || '') + '/' + (div.anio || '');
+        // Mismo formato que una línea sin dividir (AAAA-MM): "Completar control"
+        // la lee así; con MM/AAAA las fechas salían vacías
+        lineaRep.fechaLote = (div.mes && div.anio) ? (div.anio + '-' + String(div.mes).padStart(2, '0')) : '';
+        lineaRep.tipoFecha = div.tipoFecha || linea.tipoFecha || '';
         // Limpiar divisiones para no arrastrar datos del palet al Completar control
         lineaRep.divisiones = [];
         lineasReposicion.push(lineaRep);
