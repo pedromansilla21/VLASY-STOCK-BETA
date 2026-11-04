@@ -4603,6 +4603,15 @@ async function finalizarControl() {
     if (_esRepFin && (r.unidadesControladas || 0) !== _uEspBase(r)) {
       errores.push('• ' + desc + ': se pidieron ' + _uEspBase(r) + ' u. y hay ' + (r.unidadesControladas || 0) + ' u. Tiene que dar exacto.');
     }
+    // Reposición: el lote tiene que ser el que se mandó a reponer (P211 04/11:
+    // cambiaron Eo371 por EP872 y no se descontó nada)
+    if (_esRepFin && r.loteEnviado && r.loteEnviado !== '—') {
+      var _lotesRep = (r.divisiones && r.divisiones.length > 0) ? r.divisiones.map(function(d){ return d.lote; }) : [r.lote];
+      var _loteMal = _lotesRep.some(function(l) {
+        return _normLoteHist(String(l || '').toUpperCase()) !== _normLoteHist(String(r.loteEnviado).toUpperCase());
+      });
+      if (_loteMal) errores.push('• ' + desc + ': se mandó a reponer el lote ' + r.loteEnviado + '. No se puede cambiar el lote.');
+    }
     // 1. Líneas divididas: la suma de cajas de las partes debe ser exactamente
     //    igual al total escaneado — ni más ni menos.
     if (r.divisiones && r.divisiones.length > 0) {
@@ -7961,6 +7970,7 @@ async function enviarReposicion() {
       lineaRep.unidadesPorCaja     = upCaja;
       lineaRep.cantCaja            = upCaja;
       lineaRep.lote                = linea.lote     || '—';
+      lineaRep.loteEnviado         = linea.lote     || '—';  // lote pedido: no se puede cambiar al finalizar
       lineaRep.mes                 = linea.mes      || '';
       lineaRep.anio                = linea.anio     || '';
       lineaRep.fechaLote           = linea.fechaLote || '';
