@@ -6412,7 +6412,7 @@ async function _checkAndRetryPendingPalets() {
       continue;
     }
     try {
-      await sheetsAppend('LOG DESCUENTOS!A:K', [[new Date().toLocaleString('es-AR'), String(p.ocId), '', String(p.palet), '', '', '', '', 'NO CONFIRMADO', 'Carga de palet sin confirmar en HISTORIAL DE PALETS: revisar a mano', (CURRENT_USER && CURRENT_USER.name) || '']]);
+      await sheetsAppend('LOG DESCUENTOS!A:K', [[new Date().toLocaleString('es-AR'), String(p.ocId), '', String(p.palet), '', '', '', '', 'NO CONFIRMADO', 'Carga de palet sin confirmar en HISTORIAL DE PALETS: revisar a mano' + (window._verifHistFaltantes ? ' — no coincide: ' + window._verifHistFaltantes.join('; ') : ' — no se pudo leer HISTORIAL'), (CURRENT_USER && CURRENT_USER.name) || '']]);
       _clearPendingPalet(p.ocId);
     } catch(e) { continue; }
     alert('El palet ' + p.palet + ' no se pudo confirmar en HISTORIAL DE PALETS.\n\nAvisá a un supervisor para revisarlo a mano.');
@@ -7458,10 +7458,12 @@ async function _verificarHistorialPalet(filasEnviadas, intento) {
       }
       if (idx < 0 && idxBaja >= 0) { usadas[idxBaja] = true; return; }
       if (idx >= 0) { usadas[idx] = true; }
-      else { faltantes[String(f.cod).trim()] = true; hayFaltantes = true; }
+      else { faltantes[String(f.cod).trim()] = 'cant ' + (f.cant || 0) + ', lote ' + (f.lote || '—'); hayFaltantes = true; }
     });
     if (!hayFaltantes) { console.log('[verif historial] OK palet', palet, 'intento', intento); return true; }
   }
+  // Detalle para el LOG: qué artículos no coincidieron (null = no se pudo leer HISTORIAL)
+  window._verifHistFaltantes = data ? Object.keys(faltantes).map(function(k){ return k + ' (' + faltantes[k] + ')'; }) : null;
   if (intento >= 3) {
     showToast(data ? '⚠ El palet ' + filasEnviadas[0].palet + ' no se grabó completo en el historial. Avisá a un supervisor.' : '⚠ No se pudo verificar el guardado del palet ' + filasEnviadas[0].palet);
     return false;
