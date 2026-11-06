@@ -7326,7 +7326,13 @@ function renderLineasOCTable(lineas, ocId) {
     // Si el artículo fue totalmente retirado por reposición:
     // - Línea con divisiones: cantUnidades llegó a 0
     // - Línea simple: cantUnidades=0 pero cantUnidadesAlEscaneo>0 (fue escaneada y todo retirado)
-    var fueRetiradoTotal = (l.cantUnidades || 0) === 0 &&
+    // Solo se oculta si tiene lote o fecha (se escaneó y ya no queda nada).
+    // En 0 sin lote ni fecha = no se escaneó: queda a la vista para ver si
+    // el operario se salteó algo (regla de Pedro 06/11)
+    var _sinGuion = function(v){ v = String(v || '').trim(); return v && !/^[-–—\s]+$/.test(v); };
+    var _teniaLoteFecha = _sinGuion(l.lote) || _sinGuion(l.fechaLote) ||
+      (l.divisiones || []).some(function(d){ return _sinGuion(d.lote) || (d.mes && d.anio); });
+    var fueRetiradoTotal = (l.cantUnidades || 0) === 0 && _teniaLoteFecha &&
       (typeof l.divisiones !== 'undefined' || (l.cantUnidadesAlEscaneo || 0) > 0);
     if (fueRetiradoTotal) return;
 
