@@ -6626,7 +6626,9 @@ async function syncOrdenes() {
       var prioNuevo     = PRIORIDAD_ESTADO[oc.estadoManual] || 0;
       if (prioNuevo > prioExistente) {
         if ((existente.savedAt || '') > (oc.savedAt || '')) {
-          merged[oc.id] = Object.assign({}, oc, { estadoManual: existente.estadoManual, savedAt: existente.savedAt });
+          // La hoja es más nueva: va entera (antes quedaban las líneas viejas
+          // de la tablet con el estado de la hoja: D1 06/11 sin 01004-1)
+          merged[oc.id] = existente;
         } else {
           merged[oc.id] = Object.assign({}, existente, oc, { estadoManual: oc.estadoManual });
         }
@@ -11458,21 +11460,14 @@ async function aceptarAlertaEscaneo() {
 
   fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ accion: 'setAlerta', valor: 'EN_ESCANEO|' + ocId, fila: fila }) });
 
-  // Buscar OC localmente primero — si está, cargar inmediatamente sin sync
-  var ordenesLocal = loadOrdenes();
-  var ocLocal = ordenesLocal.find(function(o){ return o.id === ocId; });
-
-  if (ocLocal) {
-    // Encontrada localmente — cargar YA sin esperar sync
-    _ejecutarEnvioEscaneo(ocId, fila, enviadoPor);
-    switchPanel('scanner');
-  } else {
-    // No está localmente — sincronizar y después cargar
-    showToast('Cargando O.C...');
-    try { await syncOrdenes(); } catch(e) {}
-    _ejecutarEnvioEscaneo(ocId, fila, enviadoPor);
-    switchPanel('scanner');
-  }
+  // Siempre leer la O.C. de la hoja antes de cargarla: la copia local de la
+  // tablet puede ser vieja (D1 06/11: se agregó 01004-1 en Editar y al
+  // operario le llegó sin esa línea). Una lectura por clic.
+  showToast('Cargando O.C...');
+  try { await syncOrdenes(); } catch(e) {}
+  while (_busy_syncOrdenes) { await new Promise(function(r){ setTimeout(r, 300); }); }
+  _ejecutarEnvioEscaneo(ocId, fila, enviadoPor);
+  switchPanel('scanner');
 }
 </script>
 
