@@ -2603,6 +2603,7 @@ function updateClock() {
 // ─────────────────────────────────────────────────────────────
  function revisarAlertas() {
   if (!CURRENT_USER) return;
+  if (_esRolPedidos(CURRENT_USER.rol)) { showToast('Sin alertas de pedidos por ahora'); return; } // 0 lecturas
   if (CURRENT_USER.rol === 'operario') {
         _retryIntentos = 0; _retryEnCursoAlerta = null;
     showToast('🔄 Buscando pedidos...');
@@ -2629,7 +2630,7 @@ function updateClock() {
 if (!window._clockInterval) { window._clockInterval = setInterval(updateClock, 1000); }
 updateClock();
 if (!window._syncOrdenesInterval) { window._syncOrdenesInterval =
-setInterval(function(){ if (!document.hidden && !(CURRENT_USER && CURRENT_USER.rol === 'operario')) syncOrdenes(); }, 300000); } // cada 5 min, NO para operarios (leen ORDENES al tocar Revisar alertas)
+setInterval(function(){ if (!document.hidden && !(CURRENT_USER && (CURRENT_USER.rol === 'operario' || _esRolPedidos(CURRENT_USER.rol)))) syncOrdenes(); }, 300000); } // cada 5 min, NO para operarios (leen ORDENES al tocar Revisar alertas)
 if (!window._conexionInterval) { window._conexionInterval = setInterval(function()
 { _actualizarIndicadorConexion(navigator.onLine); }, 5000); }
 // Polling de alertas INDEPENDIENTE del syncOrdenes — antes dependía de que
@@ -9459,7 +9460,9 @@ async function syncUsuarios() {
         .map(function(r){
           var nombre = String(r[0]).trim();
           var rolRaw = String(r[1] || '').trim().toLowerCase();
+          // Pedidos (adentro): "Supervisor Pedidos" / "Operario Pedidos" en col B
           var rol = rolRaw === 'admin_compras' ? 'admin_compras'
+                  : /pedido/.test(rolRaw)      ? (/supervisor/.test(rolRaw) ? 'supervisor_pedidos' : 'operario_pedidos')
                   : /admin/.test(rolRaw)       ? 'administrativo'
                   : /buscador/.test(rolRaw)    ? 'buscador'
                   : 'operario';
@@ -9588,8 +9591,13 @@ var LOGIN_ROLES_CONFIG = {
   'administrativo':  { label: 'Administrativo',  icon: 'ti-shield-check', color: '#5BBFD6' },
   'operario':        { label: 'Operario',         icon: 'ti-barcode',      color: '#4CAF7D' },
   'buscador':        { label: 'Buscador',         icon: 'ti-search',       color: '#F0A44A' },
-  'admin_compras':   { label: 'Admin Compras',    icon: 'ti-shopping-cart',color: '#a855f7' }
+  'admin_compras':   { label: 'Admin Compras',    icon: 'ti-shopping-cart',color: '#a855f7' },
+  'supervisor_pedidos': { label: 'Supervisor Pedidos', icon: 'ti-clipboard-check', color: '#E8A33D' },
+  'operario_pedidos':   { label: 'Operario Pedidos',   icon: 'ti-packages',        color: '#C084FC' }
 };
+
+// Roles de pedidos (adentro): no usan ALERTAS de afuera, ni O.C., ni tareas
+function _esRolPedidos(rol) { return rol === 'supervisor_pedidos' || rol === 'operario_pedidos'; }
 
 var _loginRolSeleccionado = null;
 
@@ -9789,7 +9797,7 @@ function _completarLogin(selected) {
     rol: selected.rol || 'operario',
     color: userColor(selected.name),
     initials: userInitials(selected.name),
-    filaAlerta: selected.filaAlerta || 1,
+    filaAlerta: _esRolPedidos(selected.rol) ? null : (selected.filaAlerta || 1),
     pickingBeta: selected.pickingBeta === true
   };
 
@@ -9830,6 +9838,8 @@ function _completarLogin(selected) {
   if (!opInput.value.trim()) opInput.value = CURRENT_USER.name;
   document.getElementById('modal-login').classList.remove('open');
   showToast('Bienvenido, ' + CURRENT_USER.name);
+  // Pedidos: nada de O.C., tareas ni alertas de afuera (0 lecturas extra)
+  if (_esRolPedidos(CURRENT_USER.rol)) { aplicarRol(CURRENT_USER.rol); return; }
   // El descuento pendiente queda en la tablet del operario: se reintenta para todos
   setTimeout(_checkAndRetryPendingFinRep,  4000); // retry de finalizarReposicion pendientes
   // Solo administrativo/supervisor revisan pendientes — el operario no tiene acceso al sheet
@@ -9851,12 +9861,19 @@ function aplicarRol(rol) {
   // Resetear todo primero — ocultar todo
   var navScanner = document.getElementById('nav-scanner');
   if (navScanner) navScanner.style.display = 'none';
-  ['nav-remito','nav-ordenes','nav-reporte-compras','nav-registro','nav-basedatos','nav-stock-consulta','nav-buscador-palets','nav-usuarios'].forEach(function(id) {
+  ['nav-remito','nav-ordenes','nav-reporte-compras','nav-registro','nav-basedatos','nav-stock-consulta','nav-buscador-palets','nav-stock-ubicacion','nav-usuarios'].forEach(function(id) {
     var el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
 
-  if (esOperario) {
+  if (_esRolPedidos(rol) || (!esOperario && !esBuscador && !esAdminCompras && rol !== 'administrativo')) {
+    // Pedidos (y cualquier rol desconocido): por ahora solo Buscador de Productos.
+    // Los paneles de pedidos se agregan en las etapas siguientes.
+    var elBP = document.getElementById('nav-buscador-palets');
+    if (elBP) elBP.style.display = '';
+    switchPanel('buscador-palets');
+    return;
+  } else if (esOperario) {
     // Operario solo ve Escaneo
     if (navScanner) navScanner.style.display = '';
     switchPanel('scanner');
@@ -9884,7 +9901,7 @@ function aplicarRol(rol) {
   } else {
     // Administrativo — ve todo incluyendo Stock Consulta y Buscador de Palets
     if (navScanner) navScanner.style.display = '';
-    ['nav-remito','nav-ordenes','nav-registro','nav-basedatos','nav-usuarios','nav-stock-consulta','nav-buscador-palets'].forEach(function(id) {
+    ['nav-remito','nav-ordenes','nav-registro','nav-basedatos','nav-usuarios','nav-stock-consulta','nav-buscador-palets','nav-stock-ubicacion'].forEach(function(id) {
       var el = document.getElementById(id);
       if (el) el.style.display = '';
     });
