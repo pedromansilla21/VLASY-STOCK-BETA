@@ -1944,13 +1944,15 @@
       </div>
     </div>
     <div id="panel-mis-pedidos" class="panel">
-      <div class="page-header"><div>
-        <div class="page-title">Mis pedidos</div>
-        <div class="page-sub">Tus pedidos, en el orden en que hay que hacerlos</div>
-      </div></div>
-      <div class="card" style="padding:32px;text-align:center;color:var(--c-text3);">
-        <i class="ti ti-list-numbers" style="font-size:32px;"></i><div style="margin-top:8px;">No tenés pedidos asignados. (En construcción)</div>
+      <div class="page-header">
+        <div>
+          <div class="page-title">Mis pedidos</div>
+          <div class="page-sub">Tus pedidos, en el orden en que hay que hacerlos</div>
+        </div>
+        <div class="btn-row"><button class="btn" onclick="mpCargar()"><i class="ti ti-refresh"></i> Actualizar</button></div>
       </div>
+      <div id="mp-msg" style="display:none; padding:10px 14px; border-radius:8px; margin-bottom:12px; font-size:13px;"></div>
+      <div id="mp-lista"></div>
     </div>
    <!-- ═══ PANEL STOCK POR UBICACIÓN ═══ -->
 <div id="panel-stock-ubicacion" class="panel">
@@ -2656,6 +2658,7 @@ function switchPanel(name) {
   document.getElementById('panel-' + name).classList.add('active');
   if (name === 'ordenes') syncOrdenes();
   if (name === 'ped-reporte' && typeof prCargar === 'function') prCargar(); // 1 lectura al entrar (etapa 8)
+  if (name === 'mis-pedidos' && typeof mpCargar === 'function') mpCargar(); // 1 lectura al entrar (etapa 9)
   if (name === 'reporte-compras') renderReporteCompras();
   if (name === 'carga-remito') { /* ya está renderizado */ }
   if (name === 'completar-control') {
@@ -2705,6 +2708,7 @@ function updateClock() {
 // ─────────────────────────────────────────────────────────────
  function revisarAlertas() {
   if (!CURRENT_USER) return;
+  if (CURRENT_USER.rol === 'operario_pedidos') { switchPanel('mis-pedidos'); return; } // 1 lectura (misPedidos), avisa las novedades
   if (_esRolPedidos(CURRENT_USER.rol)) { showToast('Sin alertas de pedidos por ahora'); return; } // 0 lecturas
   if (CURRENT_USER.rol === 'operario') {
         _retryIntentos = 0; _retryEnCursoAlerta = null;
@@ -3826,6 +3830,127 @@ async function prMover(op, idPedido, dir) {
     _prMsg('No se cambió el orden: ' + e.message, true);
   } finally {
     _pr.busy = false;
+  }
+}
+
+// ── MIS PEDIDOS del operario de pedidos (etapa 9, 12/11) ──
+// Lecturas: 1 al entrar, tocar Actualizar o "Revisar alertas". Escrituras: 1 por Empezar / Devolver.
+var _mp = { datos: null, busy: false, devAbierto: '' };
+var _MP_EST = {
+  'ASIGNADA':     { txt: 'Para empezar',          color: '#F59E0B' },
+  'SACANDO':      { txt: 'Sacando',               color: '#3B82F6' },
+  'CORREGIR':     { txt: 'Corregir',              color: '#EF4444' },
+  'PARA CONTROL': { txt: 'Esperando control',     color: '#A855F7' },
+  'LISTO CAJAS':  { txt: 'Listo para cajas',      color: '#10B981' }
+};
+function _mpMsg(m, err) {
+  var el = document.getElementById('mp-msg');
+  if (!el) return;
+  el.textContent = m || '';
+  el.style.display = m ? '' : 'none';
+  el.style.background = err ? 'rgba(239,68,68,0.12)' : 'var(--c-surface2)';
+  el.style.color = err ? '#EF4444' : 'var(--c-text2)';
+}
+function _mpVistoKey() { return 'BETA_ped_visto_' + ((CURRENT_USER && CURRENT_USER.name) || ''); }
+function _mpVisto() { try { return JSON.parse(localStorage.getItem(_mpVistoKey()) || '{}') || {}; } catch (e) { return {}; } }
+async function mpCargar() {
+  if (!CURRENT_USER) return;
+  _mpMsg('Buscando tus pedidos…');
+  try {
+    _mp.datos = await _prGet('accion=misPedidos&usuario=' + encodeURIComponent(CURRENT_USER.name || ''));
+    _mpMsg('');
+  } catch (e) {
+    _mpMsg('No se pudieron leer tus pedidos: ' + e.message, true);
+    return;
+  }
+  var visto = _mpVisto(), nuevos = 0, guardar = {};
+  (_mp.datos.partes || []).forEach(function(p) {
+    p.nuevo = !visto[p.idPedido] || p.actualizado > visto[p.idPedido];
+    if (p.nuevo) nuevos++;
+    guardar[p.idPedido] = p.actualizado;
+  });
+  try { localStorage.setItem(_mpVistoKey(), JSON.stringify(guardar)); } catch (e) {}
+  showToast(nuevos ? '🔔 ' + nuevos + ' novedad(es) en tus pedidos' : 'Sin novedades');
+  mpRender();
+}
+function mpRender() {
+  var el = document.getElementById('mp-lista');
+  if (!el || !_mp.datos) return;
+  var partes = _mp.datos.partes || [];
+  if (!partes.length) {
+    el.innerHTML = '<div class="card" style="padding:32px; text-align:center; color:var(--c-text3);"><i class="ti ti-list-numbers" style="font-size:32px;"></i><div style="margin-top:8px;">No tenés pedidos asignados.</div></div>';
+    return;
+  }
+  var primero = partes[0];
+  el.innerHTML = partes.map(function(p, i) {
+    var est = _MP_EST[p.estado] || { txt: p.estado, color: '#8b949e' };
+    var activa = i === 0;
+    var boton;
+    if (!activa) boton = '<div style="font-size:13px; color:var(--c-text3);">🔒 Primero terminá el N° ' + escHtml(primero.nro) + '</div>';
+    else if (p.estado === 'ASIGNADA') boton = '<button class="btn btn-primary" onclick="mpEmpezar(\'' + escHtml(p.idPedido) + '\')"><i class="ti ti-player-play"></i> Empezar</button>';
+    else if (p.estado === 'PARA CONTROL') boton = '<div style="font-size:14px; font-weight:600; color:#A855F7;">⏳ Esperando que Matías controle las fechas</div>';
+    else if (p.estado === 'LISTO CAJAS') boton = '<button class="btn btn-primary" onclick="switchPanel(\'ped-escaneo\')"><i class="ti ti-package"></i> Armar cajas</button>';
+    else boton = '<button class="btn btn-primary" onclick="switchPanel(\'ped-escaneo\')"><i class="ti ti-barcode"></i> ' + (p.estado === 'CORREGIR' ? 'Corregir' : 'Seguir sacando') + '</button>';
+    var filas = p.lineas.map(function(l) {
+      var term = l.estado === 'EMBALADA' || l.estado === 'FALTANTE';
+      return '<tr' + (term ? ' style="opacity:0.5;"' : '') + '><td>' + escHtml(l.hoja) + '</td><td class="mono">' + escHtml(l.cod) + '</td><td>' + escHtml(l.desc) + '</td>' +
+        '<td style="text-align:center; font-weight:700;">' + l.pedida + '</td><td style="text-align:center;">' + (l.sacada || '') + '</td>' +
+        '<td style="font-size:12px;">' + escHtml(l.estado) + (l.motivo && (l.estado === 'CORREGIR' || l.estado === 'FALTANTE') ? '<div style="color:#EF4444;">' + escHtml(l.motivo) + '</div>' : '') + '</td></tr>';
+    }).join('');
+    var tabla = '<div class="table-wrap"><table><thead><tr><th>Hoja</th><th>Código</th><th>Descripción</th><th style="text-align:center;">Pedida</th><th style="text-align:center;">Sacada</th><th>Estado</th></tr></thead><tbody>' + filas + '</tbody></table></div>';
+    var devAb = _mp.devAbierto === p.idPedido;
+    var dev = devAb
+      ? '<div style="margin-top:10px; padding:10px; border:1px solid var(--c-border); border-radius:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">' +
+          '<select id="mp-dev-mot" onchange="document.getElementById(\'mp-dev-otro\').style.display = this.value === \'Otro\' ? \'\' : \'none\'" style="padding:7px 10px; border-radius:6px; background:var(--c-surface); color:var(--c-text); border:1px solid var(--c-border);">' +
+            '<option value="">— ¿Por qué lo devolvés? —</option><option>Me voy de reparto</option><option>Fin de turno</option><option>Otro</option></select>' +
+          '<input id="mp-dev-otro" placeholder="Escribí el motivo" style="display:none; padding:7px 10px; border-radius:6px; background:var(--c-surface); color:var(--c-text); border:1px solid var(--c-border); min-width:200px;">' +
+          '<button class="btn btn-sm btn-primary" onclick="mpDevolver(\'' + escHtml(p.idPedido) + '\')">Confirmar devolución</button>' +
+          '<button class="btn btn-sm" onclick="_mp.devAbierto=\'\'; mpRender();">Cancelar</button></div>'
+      : '<button class="btn btn-sm" style="margin-top:10px;" onclick="_mp.devAbierto=\'' + escHtml(p.idPedido) + '\'; mpRender();"><i class="ti ti-arrow-back-up"></i> Devolver a Matías</button>';
+    var cuerpo = activa ? '<div style="margin-top:12px;">' + tabla + '</div>'
+      : '<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:13px; color:var(--c-text3);">Ver ' + p.lineas.length + ' artículo(s)</summary><div style="margin-top:8px;">' + tabla + '</div></details>';
+    return '<div class="card" style="margin-bottom:10px; padding:14px 16px; border-left:4px solid ' + (activa ? est.color : 'var(--c-border)') + ';' + (activa ? '' : ' opacity:0.8;') + '">' +
+      '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">' +
+        '<div><span style="font-size:12px; color:var(--c-text3);">' + (i + 1) + '°</span> ' +
+          '<span style="font-weight:800; font-size:16px; color:#C084FC;">N° ' + escHtml(p.nro) + '</span> <span style="font-weight:600;">' + escHtml(p.cliente) + '</span>' +
+          (p.nuevo ? ' <span style="font-size:10px; font-weight:800; padding:2px 6px; border-radius:6px; background:#EF4444; color:#fff;">NUEVO</span>' : '') +
+          '<div style="font-size:12px; color:var(--c-text3); margin-top:3px;">' + p.lineas.length + ' artículo(s)' + (p.hojas ? ' · ' + escHtml(p.hojas) + ' hoja(s)' : '') + '</div></div>' +
+        '<span style="font-size:11px; font-weight:700; padding:3px 8px; border-radius:6px; background:' + est.color + '22; color:' + est.color + ';">' + escHtml(est.txt) + '</span>' +
+      '</div>' +
+      '<div style="margin-top:12px;">' + boton + '</div>' + cuerpo + dev +
+    '</div>';
+  }).join('');
+}
+async function mpEmpezar(id) {
+  if (_mp.busy) return;
+  _mp.busy = true;
+  showToast('Empezando…');
+  try {
+    var r = await _prPost({ accion: 'iniciarParte', idPedido: id, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
+    showToast('✅ Pedido N° ' + r.nro + ' en curso');
+    await mpCargar();
+  } catch (e) {
+    _mpMsg('No se pudo empezar: ' + e.message, true);
+  } finally {
+    _mp.busy = false;
+  }
+}
+async function mpDevolver(id) {
+  if (_mp.busy) return;
+  var mot = _val('mp-dev-mot');
+  if (mot === 'Otro') mot = (_val('mp-dev-otro') || '').trim();
+  if (!mot) { showToast('⚠ Elegí o escribí el motivo'); return; }
+  _mp.busy = true;
+  showToast('Devolviendo…');
+  try {
+    await _prPost({ accion: 'devolverParte', idPedido: id, motivo: mot, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
+    _mp.devAbierto = '';
+    showToast('✅ Pedido devuelto a Matías');
+    await mpCargar();
+  } catch (e) {
+    _mpMsg('No se pudo devolver: ' + e.message, true);
+  } finally {
+    _mp.busy = false;
   }
 }
 
