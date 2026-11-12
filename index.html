@@ -1208,6 +1208,7 @@
     <!-- Pedidos (adentro) -->
     <button class="nav-item" id="nav-ped-reporte" onclick="switchPanel('ped-reporte')" style="display:none;">
       <i class="ti ti-clipboard-list"></i><span>Reportes de Pedidos</span>
+      <span id="nav-ped-badge" style="display:none; margin-left:auto; background:#EF4444; color:#fff; border-radius:10px; padding:0 7px; font-size:11px; font-weight:700;"></span>
     </button>
     <button class="nav-item" id="nav-ped-control" onclick="switchPanel('ped-control')" style="display:none;">
       <i class="ti ti-calendar-check"></i><span>Escaneos</span>
@@ -1915,7 +1916,10 @@
           <div class="page-title">Reportes de Pedidos</div>
           <div class="page-sub">Pedidos para asignar a los operarios de pedidos</div>
         </div>
-        <div class="btn-row"><button class="btn" onclick="prCargar()"><i class="ti ti-refresh"></i> Actualizar</button></div>
+        <div class="btn-row">
+          <button class="btn" id="pr-alertas-btn" onclick="prVerAlertas()" style="display:none; color:#EF4444; border-color:#EF4444;" title="Ver alertas">🔔 <span id="pr-alertas-n">0</span></button>
+          <button class="btn" onclick="prCargar()"><i class="ti ti-refresh"></i> Actualizar</button>
+        </div>
       </div>
       <div class="card" id="pr-alertas-card" style="display:none; margin-bottom:14px; padding:14px 16px; border-left:4px solid #EF4444;">
         <div class="card-title" style="margin-bottom:8px;">🔔 Alertas</div>
@@ -3665,7 +3669,7 @@ async function pedGuardar() {
 
 // ── REPORTES DE PEDIDOS: lista, detalle, asignar y ordenar (etapa 8, 12/11) ──
 // Lecturas: 1 al entrar o tocar Actualizar, 1 al abrir un pedido. Escrituras: 1 por Asignar / mover.
-var _pr = { datos: null, filtro: 'todos', abierto: '', detalle: null, busy: false, avisar: false };
+var _pr = { datos: null, filtro: 'todos', abierto: '', detalle: null, busy: false, avisar: false, verAlertas: false };
 var _PR_ASIGNABLE = ['SIN ASIGNAR', 'ASIGNADA', 'DEVUELTA'];
 async function _prGet(q) {
   var r = await (await fetch(GAS_URL + '?' + q, { cache: 'no-store' })).json();
@@ -3724,8 +3728,25 @@ function _prRenderAlertas() {
     sec('⚠ FALTANTES', '#F59E0B', a.faltantes, function(x) { return ped(x) + ' — <span class="mono">' + escHtml(x.cod) + '</span>: <i>' + escHtml(x.motivo) + '</i>' + (x.operario ? ' (' + escHtml(x.operario) + ')' : ''); }) +
     sec('🆕 SIN ASIGNAR', '#3B82F6', a.sinAsignar, function(x) { return ped(x) + ' — ' + x.lineas + ' art. sin asignar'; }) +
     sec('✅ COMPLETOS HOY', '#10B981', a.completosHoy, function(x) { return ped(x); });
-  card.style.display = html ? '' : 'none';
+  var n = !a ? 0 : ['esperando', 'devueltos', 'faltantes', 'sinAsignar'].reduce(function(s, k) { return s + ((a[k] || []).length); }, 0);
+  var btn = document.getElementById('pr-alertas-btn'), badge = document.getElementById('nav-ped-badge');
+  if (btn) { btn.style.display = n ? '' : 'none'; document.getElementById('pr-alertas-n').textContent = n; }
+  if (badge) { badge.style.display = n ? '' : 'none'; badge.textContent = n; }
+  // La lista completa solo se ve al tocar la campanita; los pedidos ya llevan su etiqueta en la tarjeta.
+  card.style.display = html && _pr.verAlertas ? '' : 'none';
   document.getElementById('pr-alertas').innerHTML = html;
+}
+function prVerAlertas() { _pr.verAlertas = !_pr.verAlertas; _prRenderAlertas(); }
+// Etiqueta chica en la tarjeta del pedido según sus alertas
+function _prEtiquetas(id) {
+  var a = (_pr.datos && _pr.datos.alertas) || {};
+  var tag = function(txt, color) { return '<span style="font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; margin-left:6px; background:' + color + '22; color:' + color + ';">' + txt + '</span>'; };
+  var h = '';
+  (a.esperando || []).forEach(function(x) { if (x.idPedido === id) h += tag('⏳ ' + escHtml(x.operario) + ' espera ' + x.minutos + ' min', '#A855F7'); });
+  if ((a.devueltos || []).some(function(x) { return x.idPedido === id; })) h += tag('↩ DEVUELTO', '#EF4444');
+  var f = (a.faltantes || []).filter(function(x) { return x.idPedido === id; }).length;
+  if (f) h += tag('⚠ ' + f + ' faltante(s)', '#F59E0B');
+  return h;
 }
 function prIrA(id) {
   _pr.filtro = 'todos';
@@ -3764,7 +3785,7 @@ function prRender() {
     html += '<div class="card" id="pr-card-' + escHtml(p.id) + '" style="margin-bottom:10px; padding:14px 16px; border-left:4px solid ' + _prColor(p.estado) + ';">' +
       '<div onclick="prAbrir(\'' + escHtml(p.id) + '\')" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">' +
         '<div><span style="font-weight:800; font-size:16px; color:#C084FC;">N° ' + escHtml(p.nro) + '</span> ' +
-          '<span style="font-weight:600;">' + escHtml(p.cliente) + '</span>' +
+          '<span style="font-weight:600;">' + escHtml(p.cliente) + '</span>' + _prEtiquetas(p.id) +
           '<div style="font-size:12px; color:var(--c-text3); margin-top:3px;">' + _prFecha(p.fecha) + (p.hojas ? ' · ' + escHtml(p.hojas) + ' hoja(s)' : '') + ' · ' + p.lineas + ' artículo(s) · ' + escHtml(p.evento) + '</div></div>' +
         '<div style="text-align:right;"><span style="font-size:11px; font-weight:700; padding:3px 8px; border-radius:6px; background:' + _prColor(p.estado) + '22; color:' + _prColor(p.estado) + ';">' + escHtml(p.estado) + '</span>' +
           '<div style="font-size:12px; margin-top:4px;">' + quien + ' <i class="ti ti-chevron-' + (abierto ? 'up' : 'down') + '"></i></div></div>' +
