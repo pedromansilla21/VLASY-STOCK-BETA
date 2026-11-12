@@ -1943,12 +1943,27 @@
       </div>
     </div>
     <div id="panel-ped-escaneo" class="panel">
-      <div class="page-header"><div>
-        <div class="page-title">Escaneo de pedidos</div>
-        <div class="page-sub">Sacar artículos y armar cajas</div>
-      </div></div>
-      <div class="card" style="padding:32px;text-align:center;color:var(--c-text3);">
-        <i class="ti ti-barcode" style="font-size:32px;"></i><div style="margin-top:8px;">No tenés un pedido en curso. (En construcción)</div>
+      <div class="page-header">
+        <div>
+          <div class="page-title">Escaneo de pedidos</div>
+          <div class="page-sub" id="pe-sub">Sacar artículos y armar cajas</div>
+        </div>
+        <div class="btn-row"><button class="btn" onclick="peAbrir(true)"><i class="ti ti-refresh"></i> Actualizar</button></div>
+      </div>
+      <div id="pe-msg" style="display:none; padding:10px 14px; border-radius:8px; margin-bottom:12px; font-size:13px;"></div>
+      <div id="pe-vacio" class="card" style="padding:32px;text-align:center;color:var(--c-text3);">
+        <i class="ti ti-barcode" style="font-size:32px;"></i><div style="margin-top:8px;">No tenés un pedido en curso.</div>
+      </div>
+      <div id="pe-trabajo" style="display:none;">
+        <div class="card" style="margin-bottom:12px; padding:14px 16px; border-left:4px solid #C084FC;" onclick="var i=document.getElementById('pe-scan'); if(i) i.focus();">
+          <div id="pe-paso" style="font-size:15px; font-weight:700; margin-bottom:8px;"></div>
+          <input id="pe-scan" inputmode="none" autocomplete="off" placeholder="Escaneá acá (tocá para activar el lector)" onkeydown="if(event.key==='Enter'){ peScan(this.value); this.value=''; event.preventDefault(); }" style="width:100%; padding:12px; font-size:16px; border-radius:8px; border:2px solid #C084FC; background:var(--c-surface); color:var(--c-text);" />
+          <div id="pe-aviso" style="margin-top:8px; font-size:14px; font-weight:600; min-height:20px;"></div>
+        </div>
+        <div id="pe-lineas"></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+          <button class="btn btn-primary" id="pe-btn-terminar" onclick="peTerminar()" style="font-size:15px; padding:10px 18px;"><i class="ti ti-check"></i> Terminé de sacar</button>
+        </div>
       </div>
     </div>
     <div id="panel-mis-pedidos" class="panel">
@@ -2667,6 +2682,7 @@ function switchPanel(name) {
   if (name === 'ordenes') syncOrdenes();
   if (name === 'ped-reporte' && typeof prCargar === 'function') prCargar(); // 1 lectura al entrar (etapa 8)
   if (name === 'mis-pedidos' && typeof mpCargar === 'function') mpCargar(); // 1 lectura al entrar (etapa 9)
+  if (name === 'ped-escaneo' && typeof peAbrir === 'function') peAbrir(); // 1 lectura al entrar (etapa 10)
   if (name === 'reporte-compras') renderReporteCompras();
   if (name === 'carga-remito') { /* ya está renderizado */ }
   if (name === 'completar-control') {
@@ -3989,7 +4005,8 @@ async function mpEmpezar(id) {
   try {
     var r = await _prPost({ accion: 'iniciarParte', idPedido: id, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
     showToast('✅ Pedido N° ' + r.nro + ' en curso');
-    await mpCargar();
+    _pe.idForzado = id;
+    switchPanel('ped-escaneo');
   } catch (e) {
     _mpMsg('No se pudo empezar: ' + e.message, true);
   } finally {
@@ -4004,14 +4021,235 @@ async function mpDevolver(id) {
   _mp.busy = true;
   showToast('Devolviendo…');
   try {
+    // Lo escaneado y no mandado se graba primero ("queda sobre la mesa" para el próximo operario)
+    var loc = _peLocal();
+    if (loc && loc.id === id) {
+      var tomas = _peTomasLista(loc.tomas);
+      if (tomas.length) await _prPost({ accion: 'registrarSacado', soloGuardar: true, idPedido: id, tomas: tomas, faltantes: [], usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
+    }
     await _prPost({ accion: 'devolverParte', idPedido: id, motivo: mot, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
     _mp.devAbierto = '';
+    if (loc && loc.id === id) _peBorrarLocal();
     showToast('✅ Pedido devuelto a Matías');
     await mpCargar();
   } catch (e) {
     _mpMsg('No se pudo devolver: ' + e.message, true);
   } finally {
     _mp.busy = false;
+  }
+}
+
+// ── ESCANEO DE PEDIDOS: sacar (etapa 10, 12/11) ──
+// 1 lectura al abrir (pedidoSacar). Escanear = 0 ejecuciones (todo local, guardado en BETA_ped_<usuario>). "Terminé" = 1 POST.
+var _pe = { datos: null, loc: null, busy: false, idForzado: '', faltaAbierta: '' };
+var _PE_MOTIVOS = ['No hay en picking ni reserva', 'Lo que hay está vencido', 'Otro'];
+function _peKey() { return 'BETA_ped_' + ((CURRENT_USER && CURRENT_USER.name) || ''); }
+function _peLocal() { try { return JSON.parse(localStorage.getItem(_peKey()) || 'null'); } catch (e) { return null; } }
+function _peGuardar() { try { localStorage.setItem(_peKey(), JSON.stringify(_pe.loc)); } catch (e) {} }
+function _peBorrarLocal() { try { localStorage.removeItem(_peKey()); } catch (e) {} }
+function _peTomasLista(tomas) {
+  var out = [];
+  Object.keys(tomas || {}).forEach(function(idl) {
+    Object.keys(tomas[idl]).forEach(function(cod) { if (tomas[idl][cod] > 0) out.push({ idLinea: idl, ubicacion: cod, cant: tomas[idl][cod] }); });
+  });
+  return out;
+}
+function _peMsg(m, err) {
+  var el = document.getElementById('pe-msg');
+  if (!el) return;
+  el.textContent = m || '';
+  el.style.display = m ? '' : 'none';
+  el.style.background = err ? 'rgba(239,68,68,0.12)' : 'var(--c-surface2)';
+  el.style.color = err ? '#EF4444' : 'var(--c-text2)';
+}
+function _peAviso(m, tipo) {
+  var el = document.getElementById('pe-aviso');
+  if (!el) return;
+  el.innerHTML = m || '';
+  el.style.color = tipo === 'err' ? '#EF4444' : tipo === 'ok' ? '#10B981' : 'var(--c-text2)';
+}
+function _peVer(trabajo) {
+  document.getElementById('pe-trabajo').style.display = trabajo ? '' : 'none';
+  document.getElementById('pe-vacio').style.display = trabajo ? 'none' : '';
+}
+async function peAbrir(recargar) {
+  if (!CURRENT_USER || _pe.busy) return;
+  var id = _pe.idForzado;
+  _pe.idForzado = '';
+  if (!id) {
+    var partes = (_mp.datos && _mp.datos.partes) || [];
+    var p0 = partes[0];
+    if (p0 && ['SACANDO', 'CORREGIR', 'ASIGNADA'].indexOf(p0.estado) > -1) id = p0.idPedido;
+    else if (!_mp.datos) { var l = _peLocal(); if (l && l.id) id = l.id; }
+  }
+  if (!id && !_mp.datos) {
+    try { _mp.datos = await _prGet('accion=misPedidos&usuario=' + encodeURIComponent(CURRENT_USER.name || '')); } catch (e) {}
+    var q = ((_mp.datos && _mp.datos.partes) || [])[0];
+    if (q && ['SACANDO', 'CORREGIR', 'ASIGNADA'].indexOf(q.estado) > -1) id = q.idPedido;
+  }
+  if (!id) { _pe.datos = null; _peVer(false); _peMsg(''); document.getElementById('pe-sub').textContent = 'Sacar artículos y armar cajas'; return; }
+  _peMsg('Cargando el pedido…');
+  try {
+    _pe.datos = await _prGet('accion=pedidoSacar&id=' + encodeURIComponent(id) + '&usuario=' + encodeURIComponent(CURRENT_USER.name || ''));
+    _peMsg('');
+  } catch (e) {
+    _pe.datos = null; _peVer(false);
+    _peMsg('No se pudo abrir el pedido: ' + e.message, true);
+    return;
+  }
+  var d = _pe.datos;
+  if (d.lineas.length && d.lineas.every(function(l) { return l.estado === 'ASIGNADA'; })) {
+    _pe.datos = null; _peVer(false);
+    _peMsg('Primero tocá "Empezar" en Mis pedidos (N° ' + d.nro + ').');
+    return;
+  }
+  var loc = _peLocal();
+  if (!loc || loc.id !== d.idPedido) {
+    loc = { id: d.idPedido, tomas: {}, faltas: {}, ubi: '' };
+    d.previas.forEach(function(p) {
+      var t = loc.tomas[p.idLinea] || (loc.tomas[p.idLinea] = {});
+      t[p.ubicacion] = (t[p.ubicacion] || 0) + p.cant;
+    });
+  }
+  var vivas = {};
+  d.lineas.forEach(function(l) { vivas[l.idLinea] = true; });
+  Object.keys(loc.tomas).forEach(function(k) { if (!vivas[k]) delete loc.tomas[k]; });
+  Object.keys(loc.faltas).forEach(function(k) { if (!vivas[k]) delete loc.faltas[k]; });
+  _pe.loc = loc;
+  _peGuardar();
+  document.getElementById('pe-sub').textContent = 'Pedido N° ' + d.nro + ' — ' + d.cliente;
+  _peVer(true);
+  _peAviso('');
+  peRender();
+  setTimeout(function() { var i = document.getElementById('pe-scan'); if (i) i.focus(); }, 50);
+}
+function _peUbi(codigo) {
+  var c = String(codigo || '').trim().toUpperCase();
+  return ((_pe.datos && _pe.datos.ubicaciones) || []).find(function(u) { return u.codigo === c; }) || null;
+}
+function _peSumaLinea(idl) { var t = (_pe.loc.tomas[idl]) || {}; return Object.keys(t).reduce(function(s, k) { return s + t[k]; }, 0); }
+function _peUsadoUbi(codigo) {
+  var s = 0;
+  Object.keys(_pe.loc.tomas).forEach(function(idl) { s += _pe.loc.tomas[idl][codigo] || 0; });
+  return s;
+}
+function peScan(raw) {
+  raw = String(raw || '').trim();
+  if (!raw || !_pe.datos || !_pe.loc) return;
+  var d = _pe.datos, loc = _pe.loc;
+  var u = _peUbi(raw);
+  if (u) {
+    loc.ubi = u.codigo;
+    _peGuardar();
+    _peAviso('📍 ' + escHtml(u.ubic) + ' ' + u.tipo + ' (' + escHtml(u.cod) + ') — figuran ' + (u.disponible - _peUsadoUbi(u.codigo)) + '. Escaneá los artículos', 'ok');
+    peRender();
+    return;
+  }
+  var art = db.find(function(a) { return String(a.cbCaja).trim() === raw || String(a.cbSuelto).trim() === raw || String(a.cod).trim() === raw; });
+  if (!art) {
+    _peAviso(/PICKING|REPOSICION|RESERVA|PALET/i.test(raw) ? '⛔ Esa ubicación no es de ningún artículo de este pedido (o es un palet)' : '⛔ Código no encontrado: ' + escHtml(raw), 'err');
+    return;
+  }
+  var cod = String(art.cod).trim();
+  var lin = d.lineas.find(function(l) { return l.cod === cod; });
+  if (!lin) { _peAviso('⛔ ' + escHtml(art.desc || cod) + ' no está en este pedido', 'err'); return; }
+  var ub = _peUbi(loc.ubi);
+  if (!ub) { _peAviso('⛔ Primero escaneá la ubicación de donde lo sacás', 'err'); return; }
+  if (ub.cod !== cod) { _peAviso('⛔ Estás en la ubicación de ' + escHtml(ub.cod) + '. Escaneá la ubicación de ' + escHtml(cod), 'err'); return; }
+  var esCaja = !!art.cbCaja && String(art.cbCaja).trim() === raw;
+  var n = esCaja ? (parseInt(art.cantCaja, 10) || 0) : (parseInt(art.unidSuelto, 10) || 1);
+  if (!n) { _peAviso('⛔ La caja no tiene unidades cargadas en Artículos', 'err'); return; }
+  var falta = lin.pedida - _peSumaLinea(lin.idLinea);
+  if (n > falta) { _peAviso('⛔ Te pasás: ' + (falta ? 'faltan ' + falta + ' y esto suma ' + n : 'ya está completo'), 'err'); return; }
+  var hay = ub.disponible - _peUsadoUbi(ub.codigo);
+  if (n > hay) { _peAviso('⛔ En esa ubicación figuran ' + hay, 'err'); return; }
+  var t = loc.tomas[lin.idLinea] || (loc.tomas[lin.idLinea] = {});
+  t[ub.codigo] = (t[ub.codigo] || 0) + n;
+  if (_peSumaLinea(lin.idLinea) >= lin.pedida) delete loc.faltas[lin.idLinea];
+  _peGuardar();
+  var tot = _peSumaLinea(lin.idLinea);
+  _peAviso('✓ ' + escHtml(cod) + ' +' + n + ' → ' + tot + '/' + lin.pedida + (tot >= lin.pedida ? ' ✅ completo' : ''), 'ok');
+  peRender();
+}
+function peRender() {
+  var d = _pe.datos, loc = _pe.loc;
+  if (!d || !loc) return;
+  var ub = _peUbi(loc.ubi);
+  document.getElementById('pe-paso').innerHTML = ub
+    ? 'Ubicación: <span style="color:' + (ub.tipo === 'PICKING' ? '#10B981' : '#3B82F6') + ';">' + escHtml(ub.ubic) + ' ' + ub.tipo + '</span> (' + escHtml(ub.cod) + ') — escaneá los artículos o la próxima ubicación'
+    : '1° Escaneá la ubicación (picking o reserva)';
+  var listo = true;
+  document.getElementById('pe-lineas').innerHTML = d.lineas.map(function(l) {
+    var tot = _peSumaLinea(l.idLinea), completa = tot >= l.pedida, falta = loc.faltas[l.idLinea];
+    if (!completa && !falta) listo = false;
+    var color = completa ? '#10B981' : falta ? '#F59E0B' : (ub && ub.cod === l.cod ? '#C084FC' : 'var(--c-border)');
+    var ubis = d.ubicaciones.filter(function(u) { return u.cod === l.cod; }).map(function(u) {
+      var us = (loc.tomas[l.idLinea] || {})[u.codigo] || 0;
+      return '<span style="display:inline-block; margin:2px 6px 2px 0; padding:2px 7px; border-radius:6px; font-size:12px; background:' + (u.tipo === 'PICKING' ? 'rgba(16,185,129,0.12)' : 'rgba(59,130,246,0.12)') + '; color:' + (u.tipo === 'PICKING' ? '#10B981' : '#3B82F6') + ';">' +
+        escHtml(u.ubic) + ' ' + u.tipo + ': hay ' + (u.disponible - _peUsadoUbi(u.codigo)) + (us ? ' · sacaste ' + us : '') + '</span>';
+    }).join('') || '<span style="font-size:12px; color:#EF4444;">Sin ubicación cargada en STOCK</span>';
+    var faltaHtml = '';
+    if (_pe.faltaAbierta === l.idLinea) {
+      faltaHtml = '<div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">' +
+        '<select id="pe-falta-mot" onchange="document.getElementById(\'pe-falta-otro\').style.display = this.value === \'Otro\' ? \'\' : \'none\'" style="padding:6px 8px; border-radius:6px; background:var(--c-surface); color:var(--c-text); border:1px solid var(--c-border);">' +
+        '<option value="">— ¿Por qué falta? —</option>' + _PE_MOTIVOS.map(function(m) { return '<option>' + m + '</option>'; }).join('') + '</select>' +
+        '<input id="pe-falta-otro" placeholder="Escribí el motivo" style="display:none; padding:6px 8px; border-radius:6px; background:var(--c-surface); color:var(--c-text); border:1px solid var(--c-border);">' +
+        '<button class="btn btn-sm btn-primary" onclick="peFaltaOk(\'' + escHtml(l.idLinea) + '\')">Confirmar</button>' +
+        '<button class="btn btn-sm" onclick="_pe.faltaAbierta=\'\'; peRender();">Cancelar</button></div>';
+    } else if (falta) {
+      faltaHtml = '<div style="margin-top:6px; font-size:12px; color:#F59E0B;">⚠ Falta ' + (l.pedida - tot) + ': ' + escHtml(falta) + ' <a href="#" onclick="delete _pe.loc.faltas[\'' + escHtml(l.idLinea) + '\']; _peGuardar(); peRender(); return false;">(quitar)</a></div>';
+    }
+    return '<div class="card" style="margin-bottom:8px; padding:12px 14px; border-left:4px solid ' + color + ';">' +
+      '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">' +
+        '<div><span class="mono" style="font-weight:700;">' + escHtml(l.cod) + '</span> ' + escHtml(l.desc) +
+          (l.estado === 'CORREGIR' ? ' <span style="font-size:11px; font-weight:700; color:#EF4444;">CORREGIR: ' + escHtml(l.motivo) + '</span>' : '') + '</div>' +
+        '<div style="font-size:20px; font-weight:800; color:' + (completa ? '#10B981' : 'var(--c-text)') + ';">' + tot + '<span style="font-size:13px; opacity:.6;">/' + l.pedida + '</span></div>' +
+      '</div>' +
+      '<div style="margin-top:6px;">' + ubis + '</div>' +
+      '<div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">' +
+        (!completa && !falta && _pe.faltaAbierta !== l.idLinea ? '<button class="btn btn-sm" onclick="_pe.faltaAbierta=\'' + escHtml(l.idLinea) + '\'; peRender();">⚠ Saltear (falta)</button>' : '') +
+        (tot ? '<button class="btn btn-sm" onclick="peBorrarLinea(\'' + escHtml(l.idLinea) + '\')">↺ Borrar lo escaneado</button>' : '') +
+      '</div>' + faltaHtml +
+    '</div>';
+  }).join('');
+  var b = document.getElementById('pe-btn-terminar');
+  if (b) { b.disabled = !listo || _pe.busy; b.style.opacity = b.disabled ? '0.5' : ''; b.title = listo ? '' : 'Completá cada artículo o marcá "Saltear (falta)"'; }
+}
+function peFaltaOk(idl) {
+  var m = _val('pe-falta-mot');
+  if (m === 'Otro') m = (_val('pe-falta-otro') || '').trim();
+  if (!m) { showToast('⚠ Elegí o escribí el motivo'); return; }
+  _pe.loc.faltas[idl] = m;
+  _pe.faltaAbierta = '';
+  _peGuardar();
+  peRender();
+}
+function peBorrarLinea(idl) {
+  if (!confirm('¿Borrar lo escaneado de este artículo? (volvé a dejar la mercadería y escaneala de nuevo)')) return;
+  delete _pe.loc.tomas[idl];
+  _peGuardar();
+  peRender();
+}
+async function peTerminar() {
+  if (_pe.busy || !_pe.datos || !_pe.loc) return;
+  var d = _pe.datos, loc = _pe.loc;
+  var faltantes = Object.keys(loc.faltas).map(function(k) { return { idLinea: k, motivo: loc.faltas[k] }; });
+  _pe.busy = true;
+  peRender();
+  _peMsg('Mandando lo sacado…');
+  try {
+    var r = await _prPost({ accion: 'registrarSacado', idPedido: d.idPedido, tomas: _peTomasLista(loc.tomas), faltantes: faltantes, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
+    _peBorrarLocal();
+    _pe.datos = null; _pe.loc = null;
+    _peVer(false);
+    _peMsg('');
+    showToast(r.paraControl || r.ya ? '⏳ Listo. Esperá que Matías controle las fechas' : '✅ Listo');
+    switchPanel('mis-pedidos');
+  } catch (e) {
+    _peMsg('No se mandó: ' + e.message + '. Lo escaneado sigue guardado en la tablet.', true);
+  } finally {
+    _pe.busy = false;
+    if (_pe.datos) peRender();
   }
 }
 
