@@ -1238,10 +1238,10 @@
     <div id="panel-remito" class="panel active">
       <div class="page-header">
         <div>
-          <div class="page-title">Nueva Orden de Compra</div>
+          <div class="page-title" id="remito-titulo">Nueva Orden de Compra</div>
           <div class="page-sub">Completá los datos de la O.C. y agregá las líneas de mercadería a recepcionar</div>
         </div>
-        <div class="btn-row">
+        <div class="btn-row" id="remito-btns">
           <button class="btn" onclick="limpiarRemito()"><i class="ti ti-refresh"></i> Nuevo</button>
           <button class="btn" onclick="abrirModalOC()"><i class="ti ti-file-spreadsheet"></i> Importar Excel</button>
           <button class="btn" onclick="guardarOCActual()"><i class="ti ti-archive"></i> Guardar O.C.</button>
@@ -1249,10 +1249,54 @@
         </div>
       </div>
 
+      <!-- Selector Palet / O.C. / Pedido (etapa 7, 12/11) -->
+      <div id="sel-modo" style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+        <button type="button" class="btn" id="modo-btn-palet" onclick="setModoCarga('palet')" style="min-width:120px; font-weight:700;"><i class="ti ti-packages"></i> Palet</button>
+        <button type="button" class="btn" id="modo-btn-oc" onclick="setModoCarga('oc')" style="min-width:120px; font-weight:700;"><i class="ti ti-file-invoice"></i> O.C.</button>
+        <button type="button" class="btn" id="modo-btn-pedido" onclick="setModoCarga('pedido')" style="min-width:120px; font-weight:700;"><i class="ti ti-clipboard-list"></i> Pedido</button>
+      </div>
+
+      <!-- Carga de pedido: va a PEDIDOS / PEDIDOS LINEAS, nunca a ORDENES -->
+      <div id="ped-card" class="card" style="display:none; border:2px solid #C084FC;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+          <div class="card-title" style="margin-bottom:0; color:#C084FC;">Datos del pedido <span id="ped-editando" style="font-size:12px; color:var(--c-text2); font-weight:600;"></span></div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input id="ped-abrir-nro" class="mono" placeholder="N° pedido" autocomplete="off" style="width:110px;" onkeydown="if(event.key==='Enter') pedAbrir()" />
+            <button type="button" class="btn btn-sm" onclick="pedAbrir()"><i class="ti ti-pencil"></i> Abrir para editar</button>
+            <button type="button" class="btn btn-sm" onclick="pedNuevo()"><i class="ti ti-refresh"></i> Nuevo</button>
+          </div>
+        </div>
+        <div class="form-grid-4">
+          <div class="field" style="grid-column: span 2;"><label>Cliente *</label><input id="ped-cliente" autocomplete="off" placeholder="Nombre del cliente" /></div>
+          <div class="field"><label>N° pedido <span style="font-weight:400;color:var(--c-text3)">(vacío = automático)</span></label><input id="ped-nro" class="mono" autocomplete="off" placeholder="auto" /></div>
+          <div class="field"><label>Cant. hojas</label><input id="ped-hojas" type="number" min="1" placeholder="1" /></div>
+        </div>
+        <div class="form-grid-4" style="align-items:flex-end;">
+          <div class="field" style="grid-column: span 2;"><label>Artículo <span style="font-weight:400;color:var(--c-text3)">(código o nombre)</span></label><input id="ped-art" list="ped-art-list" autocomplete="off" placeholder="Ej: 01004-4" /><datalist id="ped-art-list"></datalist></div>
+          <div class="field"><label>Cantidad</label><input id="ped-cant" type="number" min="1" placeholder="Ej: 24" onkeydown="if(event.key==='Enter') pedAgregarLinea()" /></div>
+          <div class="field"><label>Hoja</label><input id="ped-hoja" type="number" min="1" placeholder="1" onkeydown="if(event.key==='Enter') pedAgregarLinea()" /></div>
+        </div>
+        <div class="btn-row" style="margin-bottom:12px;">
+          <button type="button" class="btn btn-primary btn-sm" onclick="pedAgregarLinea()"><i class="ti ti-plus"></i> Agregar artículo</button>
+        </div>
+        <div id="ped-alert" style="display:none; padding:8px 12px; border-radius:6px; margin-bottom:10px; font-size:13px; background:rgba(239,68,68,0.12); color:#EF4444;"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Hoja</th><th>Código</th><th>Descripción</th><th style="text-align:center;">Cantidad</th><th>Estado</th><th></th></tr></thead>
+            <tbody id="ped-tbody"></tbody>
+          </table>
+        </div>
+        <div style="display:flex; justify-content:center; margin-top:16px;">
+          <button type="button" id="ped-btn-guardar" class="btn" onclick="pedGuardar()" style="min-width:280px; height:52px; font-size:16px; font-weight:700; background:#C084FC; color:#0d1117; border-color:#C084FC;">
+            <i class="ti ti-device-floppy" style="font-size:20px;"></i> Guardar pedido
+          </button>
+        </div>
+      </div>
+
       <div class="card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
           <div class="card-title" style="margin-bottom:0;">Datos de la Orden de Compra</div>
-          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; background:var(--c-surface3); border:2px solid var(--c-border); border-radius:8px; padding:6px 14px; user-select:none;" id="label-control-palet">
+          <label style="display:none;" id="label-control-palet">
             <i class="ti ti-packages" style="font-size:16px;" id="icon-palet"></i>
             <span style="font-size:13px; font-weight:600;" id="texto-palet">Control de Palet</span>
             <input type="checkbox" id="rem-es-palet" onchange="toggleControlPalet()" style="width:16px; height:16px; cursor:pointer; accent-color:var(--c-green, #10B981);" />
@@ -3404,6 +3448,201 @@ function toggleControlPalet() {
     if (fieldPalet) fieldPalet.style.display = '';
     if (fieldContenedor) fieldContenedor.style.display = '';
     if (fieldUbicacion) fieldUbicacion.style.display = 'none';
+  }
+  if (typeof _pintarSelectorModo === 'function') _pintarSelectorModo();
+}
+
+// ── SELECTOR PALET / O.C. / PEDIDO (etapa 7, 12/11) ─────────────────────────
+// Palet y O.C. usan el formulario de siempre (checkbox rem-es-palet).
+// Pedido muestra su propio formulario y guarda en PEDIDOS / PEDIDOS LINEAS (GAS crearPedido / editarPedido).
+var _modoCarga = 'oc';
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function() { _pintarSelectorModo(); });
+else setTimeout(function() { _pintarSelectorModo(); }, 0);
+function _pintarSelectorModo() {
+  var chk = document.getElementById('rem-es-palet');
+  var modo = _modoCarga === 'pedido' ? 'pedido' : (chk && chk.checked ? 'palet' : 'oc');
+  var colores = { palet: '#0D9488', oc: '#3B82F6', pedido: '#C084FC' };
+  ['palet', 'oc', 'pedido'].forEach(function(m) {
+    var b = document.getElementById('modo-btn-' + m);
+    if (!b) return;
+    var act = m === modo;
+    b.style.background = act ? colores[m] : 'var(--c-surface3)';
+    b.style.borderColor = act ? colores[m] : 'var(--c-border)';
+    b.style.color = act ? (m === 'pedido' ? '#0d1117' : '#fff') : 'var(--c-text2)';
+  });
+}
+function setModoCarga(modo) {
+  var panel = document.getElementById('panel-remito');
+  if (!panel) return;
+  if (_modoCarga === 'pedido' && modo !== 'pedido' && _pedHayCambios() && !confirm('El pedido tiene cambios sin guardar. ¿Salir igual?')) return;
+  var esPed = modo === 'pedido';
+  Array.prototype.forEach.call(panel.children, function(el) {
+    if (el.classList.contains('page-header') || el.id === 'sel-modo' || el.id === 'ped-card') return;
+    if (esPed) {
+      if (el.dataset.pedOculto !== '1') { el.dataset.pedDisplay = el.style.display || ''; el.dataset.pedOculto = '1'; }
+      el.style.display = 'none';
+    } else if (el.dataset.pedOculto === '1') {
+      el.style.display = el.dataset.pedDisplay || '';
+      el.dataset.pedOculto = '';
+    }
+  });
+  document.getElementById('ped-card').style.display = esPed ? '' : 'none';
+  var btns = document.getElementById('remito-btns');
+  if (btns) btns.style.display = esPed ? 'none' : '';
+  var tit = document.getElementById('remito-titulo');
+  if (tit) tit.textContent = esPed ? 'Nuevo Pedido' : 'Nueva Orden de Compra';
+  _modoCarga = esPed ? 'pedido' : 'oc';
+  if (esPed) {
+    _pedCargarArticulos();
+    _pedRender();
+  } else {
+    var chk = document.getElementById('rem-es-palet');
+    if (chk) { chk.checked = (modo === 'palet'); toggleControlPalet(); }
+  }
+  _pintarSelectorModo();
+}
+
+var _ped = { id: '', idNuevo: '', lineas: [], cambios: false, busy: false };
+function _pedHayCambios() { return !!(_ped.cambios && (_ped.lineas.length || _val('ped-cliente').trim())); }
+function _pedCargarArticulos() {
+  var dl = document.getElementById('ped-art-list');
+  if (!dl || dl.dataset.cargado === String((db || []).length)) return;
+  dl.innerHTML = (db || []).map(function(a) {
+    return '<option value="' + escHtml(String(a.cod).trim()) + '">' + escHtml(a.desc || '') + '</option>';
+  }).join('');
+  dl.dataset.cargado = String((db || []).length);
+}
+function _pedAviso(msg) {
+  var al = document.getElementById('ped-alert');
+  if (!al) return;
+  al.textContent = msg || '';
+  al.style.display = msg ? '' : 'none';
+}
+function _pedEditable(l) {
+  var e = String(l.estado || '');
+  return !e || e === 'SIN ASIGNAR' || e === 'ANULADA' || (e === 'ASIGNADA' && !(l.sacada > 0));
+}
+function _pedRender() {
+  var tb = document.getElementById('ped-tbody');
+  if (!tb) return;
+  if (!_ped.lineas.length) { tb.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--c-text3); padding:16px;">Sin artículos todavía</td></tr>'; return; }
+  tb.innerHTML = _ped.lineas.map(function(l, i) {
+    var ed = _pedEditable(l);
+    var est = l.cant === 0 ? 'ANULADA' : (l.estado || 'NUEVA');
+    return '<tr' + (l.cant === 0 ? ' style="opacity:0.5;"' : '') + '>' +
+      '<td>' + (ed ? '<input type="number" min="1" value="' + escHtml(l.hoja) + '" style="width:60px;" onchange="pedCambiarLinea(' + i + ',\'hoja\',this.value)">' : escHtml(l.hoja)) + '</td>' +
+      '<td class="mono">' + escHtml(l.cod) + '</td>' +
+      '<td>' + escHtml(l.desc) + '</td>' +
+      '<td style="text-align:center;">' + (ed ? '<input type="number" min="0" value="' + l.cant + '" style="width:80px; text-align:center;" onchange="pedCambiarLinea(' + i + ',\'cant\',this.value)">' : l.cant) + '</td>' +
+      '<td style="font-size:12px;">' + escHtml(est) + (ed ? '' : ' 🔒') + '</td>' +
+      '<td>' + (ed && l.cant > 0 ? '<button type="button" class="btn btn-sm" onclick="pedQuitarLinea(' + i + ')" title="Quitar"><i class="ti ti-trash"></i></button>' : '') + '</td>' +
+    '</tr>';
+  }).join('');
+}
+function pedAgregarLinea() {
+  _pedAviso('');
+  var v = _val('ped-art').trim();
+  var cant = parseInt(_val('ped-cant'), 10);
+  var hoja = parseInt(_val('ped-hoja'), 10) || '';
+  if (!v) { _pedAviso('Elegí un artículo.'); return; }
+  var art = (db || []).find(function(a) { return String(a.cod).trim() === v; }) ||
+            (db || []).find(function(a) { return String(a.desc || '').trim().toLowerCase() === v.toLowerCase(); });
+  if (!art) { _pedAviso('Artículo no encontrado: ' + v + '. Elegilo de la lista.'); return; }
+  if (!(cant > 0)) { _pedAviso('Poné la cantidad.'); return; }
+  var cod = String(art.cod).trim();
+  var ya = _ped.lineas.find(function(l) { return l.cod === cod && String(l.hoja) === String(hoja) && _pedEditable(l); });
+  if (ya) { ya.cant = (ya.cant || 0) + cant; showToast('Se sumó a la línea de ' + cod + ': ' + ya.cant); }
+  else _ped.lineas.push({ idLinea: '', cod: cod, desc: art.desc || '', cant: cant, hoja: hoja, estado: '', sacada: 0 });
+  _ped.cambios = true;
+  _setVal('ped-art', ''); _setVal('ped-cant', '');
+  _pedRender();
+  var inp = document.getElementById('ped-art'); if (inp) inp.focus();
+}
+function pedCambiarLinea(i, campo, valor) {
+  var l = _ped.lineas[i];
+  if (!l || !_pedEditable(l)) return;
+  if (campo === 'cant') { var c = parseInt(valor, 10); l.cant = isNaN(c) || c < 0 ? 0 : c; }
+  else l.hoja = parseInt(valor, 10) || '';
+  _ped.cambios = true;
+  _pedRender();
+}
+function pedQuitarLinea(i) {
+  var l = _ped.lineas[i];
+  if (!l || !_pedEditable(l)) return;
+  if (!l.idLinea) _ped.lineas.splice(i, 1);
+  else l.cant = 0; // ya está en la hoja: queda ANULADA al guardar
+  _ped.cambios = true;
+  _pedRender();
+}
+function pedNuevo() {
+  if (_pedHayCambios() && !confirm('El pedido tiene cambios sin guardar. ¿Empezar uno nuevo igual?')) return;
+  _ped = { id: '', idNuevo: '', lineas: [], cambios: false, busy: false };
+  ['ped-cliente', 'ped-nro', 'ped-hojas', 'ped-art', 'ped-cant', 'ped-hoja', 'ped-abrir-nro'].forEach(function(id) { _setVal(id, ''); });
+  var nro = document.getElementById('ped-nro'); if (nro) nro.disabled = false;
+  document.getElementById('ped-editando').textContent = '';
+  _pedAviso('');
+  _pedRender();
+}
+// 2 lecturas por clic (PEDIDOS + PEDIDOS LINEAS), solo al tocar "Abrir para editar"
+async function pedAbrir() {
+  var nro = _val('ped-abrir-nro').trim();
+  if (!nro) { _pedAviso('Escribí el N° de pedido a abrir.'); return; }
+  if (_pedHayCambios() && !confirm('El pedido actual tiene cambios sin guardar. ¿Abrir otro igual?')) return;
+  _pedAviso('');
+  showToast('🔍 Buscando pedido ' + nro + '...');
+  try {
+    var peds = await sheetsRead('PEDIDOS!A2:L');
+    var p = peds.find(function(r) { return String(r[1]).trim() === nro; });
+    if (!p) { _pedAviso('No existe el pedido N° ' + nro + '.'); return; }
+    var est = String(p[6]).trim();
+    if (est === 'COMPLETO' || est === 'ANULADO') { _pedAviso('El pedido N° ' + nro + ' está ' + est + ': no se puede editar.'); return; }
+    var id = String(p[0]).trim();
+    var lins = await sheetsRead("'PEDIDOS LINEAS'!A2:P");
+    _ped = { id: id, idNuevo: '', cambios: false, busy: false, lineas: lins.filter(function(r) { return String(r[1]).trim() === id; }).map(function(r) {
+      return { idLinea: String(r[0]).trim(), hoja: parseInt(r[2], 10) || '', cod: String(r[3]).trim(), desc: r[4] || '', cant: parseInt(r[5], 10) || 0, sacada: parseFloat(r[6]) || 0, estado: String(r[9]).trim() };
+    }) };
+    _setVal('ped-cliente', p[3] || '');
+    _setVal('ped-hojas', p[4] || '');
+    _setVal('ped-nro', String(p[1]).trim());
+    var nroEl = document.getElementById('ped-nro'); if (nroEl) nroEl.disabled = true;
+    document.getElementById('ped-editando').textContent = '— editando N° ' + String(p[1]).trim() + ' (' + est + ')';
+    _pedRender();
+  } catch (e) {
+    _pedAviso('No se pudo leer el pedido. Probá de nuevo.');
+  }
+}
+// 1 POST por clic. Sin no-cors: se lee la respuesta del GAS (ok / error).
+async function pedGuardar() {
+  if (_ped.busy) return;
+  _pedAviso('');
+  var cliente = _val('ped-cliente').trim();
+  if (!cliente) { _pedAviso('Falta el cliente.'); return; }
+  if (!_ped.lineas.some(function(l) { return l.cant > 0; })) { _pedAviso('El pedido no tiene artículos.'); return; }
+  var usuario = (CURRENT_USER && CURRENT_USER.name) || '';
+  var lineas = _ped.lineas.map(function(l) { return { idLinea: l.idLinea, cod: l.cod, desc: l.desc, cant: l.cant, hoja: l.hoja }; });
+  var body;
+  if (_ped.id) {
+    body = { accion: 'editarPedido', idPedido: _ped.id, cliente: cliente, hojas: _val('ped-hojas'), usuario: usuario, lineas: lineas };
+  } else {
+    if (!_ped.idNuevo) _ped.idNuevo = 'PD-' + Date.now() + '-' + Math.random().toString(36).replace(/[^a-z]/g, '').slice(0, 4).toUpperCase();
+    body = { accion: 'crearPedido', idPedido: _ped.idNuevo, nro: _val('ped-nro').trim(), cliente: cliente, hojas: _val('ped-hojas'), usuario: usuario, lineas: lineas.filter(function(l) { return l.cant > 0; }) };
+  }
+  _ped.busy = true;
+  var btn = document.getElementById('ped-btn-guardar');
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+  try {
+    var r = await (await fetch(GAS_URL, { method: 'POST', body: JSON.stringify(body) })).json();
+    if (!r.ok) { _pedAviso('No se guardó: ' + (r.error || 'error')); return; }
+    showToast(body.accion === 'crearPedido' ? '✅ Pedido N° ' + r.data.nro + ' guardado' : '✅ Pedido actualizado');
+    _ped.cambios = false;
+    pedNuevo();
+  } catch (e) {
+    _pedAviso(body.accion === 'crearPedido'
+      ? 'No se pudo confirmar el guardado (sin conexión o GAS ocupado). Tocá Guardar de nuevo: no se duplica.'
+      : 'No se pudo confirmar el guardado. Antes de guardar otra vez, abrí el pedido de nuevo para ver si los cambios quedaron.');
+  } finally {
+    _ped.busy = false;
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
   }
 }
 
@@ -8269,6 +8508,7 @@ async function _ejecutarEnvioEscaneo(ocId, filaAlerta, enviadoPor) {
   // Setear checkbox de palet si la OC es un control de palet
   var chkPalet = document.getElementById('rem-es-palet');
   if (chkPalet) chkPalet.checked = !!(oc.esPalet);
+  if (typeof _pintarSelectorModo === 'function') _pintarSelectorModo();
   // Setear ubicacion para que _guardarEnHistorialPalets la pueda leer
   var elUbi = document.getElementById('rem-ubicacion');
   if (elUbi) elUbi.value = (oc.ubicacion && oc.ubicacion !== '—') ? oc.ubicacion : '';
@@ -9196,7 +9436,8 @@ function recuperarSesion() {
       var checkPalet = document.getElementById('rem-es-palet');
       if (checkPalet) checkPalet.checked = true;
     }
-    
+    if (typeof _pintarSelectorModo === 'function') _pintarSelectorModo();
+
     var d = remitoDatos;
     if (d.nro && d.nro!=='—')        _setVal('rem-nro', d.nro);
     if (d.proveedor && d.proveedor!=='—') _setVal('rem-proveedor', d.proveedor);
