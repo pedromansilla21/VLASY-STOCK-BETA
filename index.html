@@ -3062,8 +3062,8 @@ var mIso = fecha.match(/^(\d{4})-(\d{2})-\d{2}T/);
 if (mIso) fecha = mIso[2] + '/' + mIso[1];
         var clave = lote + '|' + fecha;
         if (!mapa[clave]) mapa[clave] = { cant: 0, fecha: fecha, lote: lote };
-        if (accion === 'ENTRADA') mapa[clave].cant += cant;
-        if (accion === 'SALIDA') mapa[clave].cant -= cant;
+        // REGISTRO es tabla de saldos (11/11): col E = saldo. SALIDA queda solo por filas viejas.
+        if (accion === 'SALIDA') mapa[clave].cant -= cant; else mapa[clave].cant += cant;
       });
       lotes = Object.keys(mapa).map(function(k){ return mapa[k]; })
         .filter(function(l){ return l.cant > 0; });
@@ -3102,8 +3102,8 @@ async function suAbrirReponer(cod) {
       if (m) fecha = m[2] + '/' + m[1];
       var clave = ubi + '|' + lote + '|' + fecha;
       if (!mapa[clave]) mapa[clave] = { ubi: ubi, lote: lote, fecha: fecha, cant: 0 };
-      if (accion === 'ENTRADA') mapa[clave].cant += cant;
-      if (accion === 'SALIDA') mapa[clave].cant -= cant;
+      // REGISTRO es tabla de saldos (11/11): col E = saldo. SALIDA queda solo por filas viejas.
+      if (accion === 'SALIDA') mapa[clave].cant -= cant; else mapa[clave].cant += cant;
     });
     // Lo que ya tomó otra tarea sin retirar no está disponible
     var _tarAb = await sheetsRead('TAREAS REPOSICION!A2:J');
