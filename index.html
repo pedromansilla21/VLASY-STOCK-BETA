@@ -1955,11 +1955,18 @@
         <i class="ti ti-barcode" style="font-size:32px;"></i><div style="margin-top:8px;">No tenés un pedido en curso.</div>
       </div>
       <div id="pe-trabajo" style="display:none;">
-        <div class="card" style="margin-bottom:12px; padding:14px 16px; border-left:4px solid #C084FC;" onclick="var i=document.getElementById('pe-scan'); if(i) i.focus();">
-          <div id="pe-paso" style="font-size:15px; font-weight:700; margin-bottom:8px;"></div>
-          <input id="pe-scan" inputmode="none" autocomplete="off" placeholder="Escaneá acá (tocá para activar el lector)" onkeydown="if(event.key==='Enter'){ peScan(this.value); this.value=''; event.preventDefault(); }" style="width:100%; padding:12px; font-size:16px; border-radius:8px; border:2px solid #C084FC; background:var(--c-surface); color:var(--c-text);" />
-          <div id="pe-aviso" style="margin-top:8px; font-size:14px; font-weight:600; min-height:20px;"></div>
+        <div style="max-width:560px; margin:0 auto 16px; border:1px solid #C084FC; border-radius:14px; overflow:hidden; background:var(--c-surface);">
+          <div onclick="pePlegar()" style="cursor:pointer; background:#C084FC; color:#1a1325; padding:10px 16px; display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:800; letter-spacing:.06em;">
+            <span>SACAR ARTÍCULOS</span><span id="pe-contador"></span>
+          </div>
+          <div id="pe-tarjeta" style="padding:14px 16px 0;"></div>
+          <div style="padding:12px 16px 14px;" onclick="var i=document.getElementById('pe-scan'); if(i) i.focus();">
+            <input id="pe-scan" inputmode="none" autocomplete="off" placeholder="Esperando escaneo..." onkeydown="if(event.key==='Enter'){ peScan(this.value); this.value=''; event.preventDefault(); }" style="width:100%; padding:12px; font-size:15px; font-family:monospace; border-radius:10px; border:2px solid var(--c-text2); background:var(--c-bg, #0d1117); color:var(--c-text);" />
+            <div id="pe-aviso" style="margin-top:8px; font-size:14px; font-weight:600; min-height:20px;"></div>
+            <div id="pe-acciones"></div>
+          </div>
         </div>
+        <div style="font-size:12px; font-weight:800; color:var(--c-text3); letter-spacing:.06em; margin-bottom:6px;">RESUMEN DEL PEDIDO</div>
         <div id="pe-lineas"></div>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
           <button class="btn btn-primary" id="pe-btn-terminar" onclick="peTerminar()" style="font-size:15px; padding:10px 18px;"><i class="ti ti-check"></i> Terminé de sacar</button>
@@ -3722,21 +3729,51 @@ async function prCargar() {
   prRender();
   if (_pr.avisar) {
     _pr.avisar = false;
-    var a = _pr.datos.alertas || {};
+    var a = _prAlertasPend();
     var n = ['esperando', 'devueltos', 'faltantes', 'sinAsignar'].reduce(function(s, k) { return s + ((a[k] || []).length); }, 0);
     showToast(n ? '🔔 ' + n + ' alerta(s) de pedidos' : 'Sin alertas de pedidos');
   }
 }
+// Alertas marcadas como vistas (✓), guardadas en esta tablet. Si la situación se resuelve y vuelve a pasar, la alerta sale de nuevo.
+function _prVistasKey() { return 'BETA_alertas_vistas_' + ((CURRENT_USER && CURRENT_USER.name) || ''); }
+function _prVistas() { try { return JSON.parse(localStorage.getItem(_prVistasKey()) || '{}') || {}; } catch (e) { return {}; } }
+function _prAlertaKey(tipo, x) { return tipo + '|' + x.idPedido + '|' + (x.operario || '') + '|' + (x.motivo || x.cod || ''); }
+function _prAlertasPend() {
+  var a = (_pr.datos && _pr.datos.alertas) || {}, vistas = _prVistas(), sigue = {}, out = {};
+  ['esperando', 'devueltos', 'faltantes', 'sinAsignar', 'completosHoy'].forEach(function(tipo) {
+    out[tipo] = (a[tipo] || []).filter(function(x) {
+      var k = _prAlertaKey(tipo, x);
+      x._k = k;
+      if (vistas[k]) { sigue[k] = 1; return false; }
+      return true;
+    });
+  });
+  try { localStorage.setItem(_prVistasKey(), JSON.stringify(sigue)); } catch (e) {} // olvida las que ya no existen
+  return out;
+}
+function prAlertaVista(n, ev) {
+  if (ev) ev.stopPropagation();
+  var k = _pr.akeys[n];
+  if (!k) return;
+  var v = _prVistas();
+  v[k] = 1;
+  try { localStorage.setItem(_prVistasKey(), JSON.stringify(v)); } catch (e) {}
+  _prRenderAlertas();
+}
 function _prRenderAlertas() {
   var card = document.getElementById('pr-alertas-card');
   if (!card) return;
-  var a = (_pr.datos && _pr.datos.alertas) || null;
-  var ir = function(id) { return ' onclick="prIrA(\'' + escHtml(id) + '\')" style="cursor:pointer; padding:7px 10px; border-radius:6px; background:var(--c-surface2); margin-bottom:5px; font-size:13px;"'; };
-  var ped = function(x) { return '<b style="color:#C084FC;">N° ' + escHtml(x.nro) + '</b> ' + escHtml(x.cliente); };
+  var a = _pr.datos && _pr.datos.alertas ? _prAlertasPend() : null;
+  _pr.akeys = [];
+  var ped =function(x) { return '<b style="color:#C084FC;">N° ' + escHtml(x.nro) + '</b> ' + escHtml(x.cliente); };
   var sec = function(titulo, color, items, fn) {
     if (!items || !items.length) return '';
     return '<div style="margin-bottom:10px;"><div style="font-size:12px; font-weight:800; color:' + color + '; margin-bottom:5px;">' + titulo + ' (' + items.length + ')</div>' +
-      items.map(function(x) { return '<div' + ir(x.idPedido) + '>' + fn(x) + '</div>'; }).join('') + '</div>';
+      items.map(function(x) {
+        return '<div style="display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:6px; background:var(--c-surface2); margin-bottom:5px; font-size:13px;">' +
+          '<div onclick="prIrA(\'' + escHtml(x.idPedido) + '\')" style="flex:1; cursor:pointer;">' + fn(x) + '</div>' +
+          '<button class="btn btn-sm" title="Ya la vi: sacarla" onclick="prAlertaVista(' + (_pr.akeys.push(x._k) - 1) + ', event)" style="color:#10B981; border-color:#10B981; padding:3px 10px;">✓ OK</button></div>';
+      }).join('') + '</div>';
   };
   var html = !a ? '' :
     sec('⏳ ESPERANDO CONTROL DE FECHAS', '#A855F7', a.esperando, function(x) { return ped(x) + ' — <b>' + escHtml(x.operario) + '</b> espera hace <b>' + x.minutos + ' min</b> (' + x.lineas + ' art.)'; }) +
@@ -4115,7 +4152,9 @@ async function peAbrir(recargar) {
   d.lineas.forEach(function(l) { vivas[l.idLinea] = true; });
   Object.keys(loc.tomas).forEach(function(k) { if (!vivas[k]) delete loc.tomas[k]; });
   Object.keys(loc.faltas).forEach(function(k) { if (!vivas[k]) delete loc.faltas[k]; });
+  if (!loc.salt) loc.salt = {};
   _pe.loc = loc;
+  if (!loc.paso || !vivas[loc.paso.idLinea]) _peAvanzar(); // si apretó F5 en el medio, sigue en el mismo paso
   _peGuardar();
   document.getElementById('pe-sub').textContent = 'Pedido N° ' + d.nro + ' — ' + d.cliente;
   _peVer(true);
@@ -4133,101 +4172,165 @@ function _peUsadoUbi(codigo) {
   Object.keys(_pe.loc.tomas).forEach(function(idl) { s += _pe.loc.tomas[idl][codigo] || 0; });
   return s;
 }
+// Paso a paso: una tarjeta = un artículo en UNA ubicación. Primero la ubicación, después las unidades,
+// y recién al completar se abre la siguiente (picking primero, después reservas).
+function _peUbisDe(cod) {
+  return ((_pe.datos && _pe.datos.ubicaciones) || []).filter(function(u) { return u.cod === cod; })
+    .sort(function(a, b) { return (a.tipo === 'PICKING' ? 0 : 1) - (b.tipo === 'PICKING' ? 0 : 1) || (a.ubic < b.ubic ? -1 : 1); });
+}
+function _peHay(u) { return u.disponible - _peUsadoUbi(u.codigo); }
+// Arma el próximo paso: primera línea sin completar (ni salteada), primera ubicación con algo y no descartada
+function _peSiguiente() {
+  var d = _pe.datos, loc = _pe.loc;
+  for (var i = 0; i < d.lineas.length; i++) {
+    var l = d.lineas[i];
+    var falta = l.pedida - _peSumaLinea(l.idLinea);
+    if (falta <= 0 || loc.faltas[l.idLinea]) continue;
+    var salt = loc.salt[l.idLinea] || [];
+    var u = _peUbisDe(l.cod).find(function(x) { return salt.indexOf(x.codigo) === -1 && _peHay(x) > 0; });
+    if (!u) return { idLinea: l.idLinea, codigo: '', objetivo: 0, hechas: 0, ubiOk: false, sinUbic: true };
+    return { idLinea: l.idLinea, codigo: u.codigo, objetivo: Math.min(falta, _peHay(u)), hechas: 0, ubiOk: false };
+  }
+  return null;
+}
+function _peAvanzar() { _pe.loc.paso = _peSiguiente(); _pe.faltaAbierta = ''; _peGuardar(); }
+function _peLinea(idl) { return _pe.datos.lineas.find(function(l) { return l.idLinea === idl; }); }
 function peScan(raw) {
   raw = String(raw || '').trim();
   if (!raw || !_pe.datos || !_pe.loc) return;
-  var d = _pe.datos, loc = _pe.loc;
+  var loc = _pe.loc, p = loc.paso;
+  if (!p) { _peAviso('✅ Ya está todo. Tocá "Terminé de sacar"', 'ok'); return; }
+  if (p.sinUbic) { _peAviso('⛔ No queda de dónde sacar este artículo: tocá "Saltear (falta)"', 'err'); return; }
+  var l = _peLinea(p.idLinea);
   var u = _peUbi(raw);
-  if (u) {
-    loc.ubi = u.codigo;
-    _peGuardar();
-    _peAviso('📍 ' + escHtml(u.ubic) + ' ' + u.tipo + ' (' + escHtml(u.cod) + ') — figuran ' + (u.disponible - _peUsadoUbi(u.codigo)) + '. Escaneá los artículos', 'ok');
+  if (!p.ubiOk) {
+    if (u && u.codigo === p.codigo) {
+      p.ubiOk = true;
+      _peGuardar();
+      _peAviso('📍 Ubicación correcta. Escaneá las unidades', 'ok');
+    } else if (u || /PICKING|REPOSICION|RESERVA|PALET/i.test(raw)) {
+      _peAviso('⛔ Esa no es. Escaneá la ubicación ' + escHtml(_peUbi(p.codigo).ubic), 'err');
+    } else {
+      _peAviso('⛔ Primero escaneá la ubicación', 'err');
+    }
     peRender();
     return;
   }
+  if (u || /PICKING|REPOSICION|RESERVA|PALET/i.test(raw)) { _peAviso('⛔ Primero terminá las unidades de esta ubicación', 'err'); return; }
   var art = db.find(function(a) { return String(a.cbCaja).trim() === raw || String(a.cbSuelto).trim() === raw || String(a.cod).trim() === raw; });
-  if (!art) {
-    _peAviso(/PICKING|REPOSICION|RESERVA|PALET/i.test(raw) ? '⛔ Esa ubicación no es de ningún artículo de este pedido (o es un palet)' : '⛔ Código no encontrado: ' + escHtml(raw), 'err');
-    return;
-  }
-  var cod = String(art.cod).trim();
-  var lin = d.lineas.find(function(l) { return l.cod === cod; });
-  if (!lin) { _peAviso('⛔ ' + escHtml(art.desc || cod) + ' no está en este pedido', 'err'); return; }
-  var ub = _peUbi(loc.ubi);
-  if (!ub) { _peAviso('⛔ Primero escaneá la ubicación de donde lo sacás', 'err'); return; }
-  if (ub.cod !== cod) { _peAviso('⛔ Estás en la ubicación de ' + escHtml(ub.cod) + '. Escaneá la ubicación de ' + escHtml(cod), 'err'); return; }
+  if (!art) { _peAviso('⛔ Código no encontrado: ' + escHtml(raw), 'err'); return; }
+  if (String(art.cod).trim() !== l.cod) { _peAviso('⛔ ' + escHtml(art.desc || art.cod) + ' no es este artículo. Buscá ' + escHtml(l.cod), 'err'); return; }
   var esCaja = !!art.cbCaja && String(art.cbCaja).trim() === raw;
   var n = esCaja ? (parseInt(art.cantCaja, 10) || 0) : (parseInt(art.unidSuelto, 10) || 1);
   if (!n) { _peAviso('⛔ La caja no tiene unidades cargadas en Artículos', 'err'); return; }
-  var falta = lin.pedida - _peSumaLinea(lin.idLinea);
-  if (n > falta) { _peAviso('⛔ Te pasás: ' + (falta ? 'faltan ' + falta + ' y esto suma ' + n : 'ya está completo'), 'err'); return; }
-  var hay = ub.disponible - _peUsadoUbi(ub.codigo);
-  if (n > hay) { _peAviso('⛔ En esa ubicación figuran ' + hay, 'err'); return; }
-  var t = loc.tomas[lin.idLinea] || (loc.tomas[lin.idLinea] = {});
-  t[ub.codigo] = (t[ub.codigo] || 0) + n;
-  if (_peSumaLinea(lin.idLinea) >= lin.pedida) delete loc.faltas[lin.idLinea];
+  var resta = p.objetivo - p.hechas;
+  if (n > resta) { _peAviso('⛔ Te pasás: ' + (resta ? 'faltan ' + resta + ' y esto suma ' + n + (esCaja ? ' (escaneá sueltas)' : '') : 'ya están todas'), 'err'); return; }
+  var t = loc.tomas[l.idLinea] || (loc.tomas[l.idLinea] = {});
+  t[p.codigo] = (t[p.codigo] || 0) + n;
+  p.hechas += n;
   _peGuardar();
-  var tot = _peSumaLinea(lin.idLinea);
-  _peAviso('✓ ' + escHtml(cod) + ' +' + n + ' → ' + tot + '/' + lin.pedida + (tot >= lin.pedida ? ' ✅ completo' : ''), 'ok');
+  _peAviso(p.hechas >= p.objetivo ? '✅ Listo. Tocá "Confirmar y continuar"' : '✓ +' + n, 'ok');
   peRender();
 }
+function peContinuar() {
+  var p = _pe.loc && _pe.loc.paso;
+  if (!p || p.hechas < p.objetivo) return;
+  _peAvanzar();
+  _peAviso('');
+  peRender();
+}
+// "No hay acá": lo escaneado queda; se pasa a la siguiente ubicación de ese artículo
+function peNoHayAca() {
+  var p = _pe.loc && _pe.loc.paso;
+  if (!p || !p.codigo) return;
+  var s = _pe.loc.salt[p.idLinea] || (_pe.loc.salt[p.idLinea] = []);
+  if (s.indexOf(p.codigo) === -1) s.push(p.codigo);
+  _peAvanzar();
+  _peAviso('');
+  peRender();
+}
+function pePlegar() { _pe.plegada = !_pe.plegada; peRender(); }
 function peRender() {
   var d = _pe.datos, loc = _pe.loc;
   if (!d || !loc) return;
-  var ub = _peUbi(loc.ubi);
-  document.getElementById('pe-paso').innerHTML = ub
-    ? 'Ubicación: <span style="color:' + (ub.tipo === 'PICKING' ? '#10B981' : '#3B82F6') + ';">' + escHtml(ub.ubic) + ' ' + ub.tipo + '</span> (' + escHtml(ub.cod) + ') — escaneá los artículos o la próxima ubicación'
-    : '1° Escaneá la ubicación (picking o reserva)';
-  var listo = true;
-  document.getElementById('pe-lineas').innerHTML = d.lineas.map(function(l) {
-    var tot = _peSumaLinea(l.idLinea), completa = tot >= l.pedida, falta = loc.faltas[l.idLinea];
-    if (!completa && !falta) listo = false;
-    var color = completa ? '#10B981' : falta ? '#F59E0B' : (ub && ub.cod === l.cod ? '#C084FC' : 'var(--c-border)');
-    var ubis = d.ubicaciones.filter(function(u) { return u.cod === l.cod; }).map(function(u) {
-      var us = (loc.tomas[l.idLinea] || {})[u.codigo] || 0;
-      return '<span style="display:inline-block; margin:2px 6px 2px 0; padding:2px 7px; border-radius:6px; font-size:12px; background:' + (u.tipo === 'PICKING' ? 'rgba(16,185,129,0.12)' : 'rgba(59,130,246,0.12)') + '; color:' + (u.tipo === 'PICKING' ? '#10B981' : '#3B82F6') + ';">' +
-        escHtml(u.ubic) + ' ' + u.tipo + ': hay ' + (u.disponible - _peUsadoUbi(u.codigo)) + (us ? ' · sacaste ' + us : '') + '</span>';
-    }).join('') || '<span style="font-size:12px; color:#EF4444;">Sin ubicación cargada en STOCK</span>';
-    var faltaHtml = '';
-    if (_pe.faltaAbierta === l.idLinea) {
-      faltaHtml = '<div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">' +
-        '<select id="pe-falta-mot" onchange="document.getElementById(\'pe-falta-otro\').style.display = this.value === \'Otro\' ? \'\' : \'none\'" style="padding:6px 8px; border-radius:6px; background:var(--c-surface); color:var(--c-text); border:1px solid var(--c-border);">' +
-        '<option value="">— ¿Por qué falta? —</option>' + _PE_MOTIVOS.map(function(m) { return '<option>' + m + '</option>'; }).join('') + '</select>' +
-        '<input id="pe-falta-otro" placeholder="Escribí el motivo" style="display:none; padding:6px 8px; border-radius:6px; background:var(--c-surface); color:var(--c-text); border:1px solid var(--c-border);">' +
-        '<button class="btn btn-sm btn-primary" onclick="peFaltaOk(\'' + escHtml(l.idLinea) + '\')">Confirmar</button>' +
-        '<button class="btn btn-sm" onclick="_pe.faltaAbierta=\'\'; peRender();">Cancelar</button></div>';
-    } else if (falta) {
-      faltaHtml = '<div style="margin-top:6px; font-size:12px; color:#F59E0B;">⚠ Falta ' + (l.pedida - tot) + ': ' + escHtml(falta) + ' <a href="#" onclick="delete _pe.loc.faltas[\'' + escHtml(l.idLinea) + '\']; _peGuardar(); peRender(); return false;">(quitar)</a></div>';
+  var p = loc.paso;
+  var nHechas = d.lineas.filter(function(l) { return _peSumaLinea(l.idLinea) >= l.pedida || loc.faltas[l.idLinea]; }).length;
+  document.getElementById('pe-contador').textContent = (p ? d.lineas.findIndex(function(l) { return l.idLinea === p.idLinea; }) + 1 : d.lineas.length) + ' / ' + d.lineas.length + (_pe.plegada ? '  ▸' : '  ▾');
+  var tarjeta = '', acciones = '';
+  var caja = function(inner, borde) { return '<div style="background:var(--c-surface2); border-radius:10px; padding:14px; margin-bottom:12px;' + (borde ? ' border-left:3px solid ' + borde + ';' : '') + '">' + inner + '</div>'; };
+  if (!p) {
+    tarjeta = caja('<div style="font-size:16px; font-weight:800; color:#10B981;">✅ Sacaste todo el pedido</div><div style="font-size:13px; color:var(--c-text3); margin-top:4px;">Revisá el resumen y tocá "Terminé de sacar".</div>', '#10B981');
+  } else {
+    var l = _peLinea(p.idLinea), u = _peUbi(p.codigo);
+    var colU = u && u.tipo === 'PICKING' ? '#10B981' : '#3B82F6';
+    tarjeta = caja('<div style="font-size:11px; font-weight:700; color:var(--c-text3); letter-spacing:.06em;">ARTÍCULO</div>' +
+      '<div class="mono" style="font-size:24px; font-weight:800; color:#C084FC; margin-top:2px;">' + escHtml(l.cod) + '</div>' +
+      '<div style="font-weight:700; margin-top:2px;">' + escHtml(l.desc) + '</div>' +
+      (l.estado === 'CORREGIR' ? '<div style="font-size:12px; font-weight:700; color:#EF4444; margin-top:4px;">CORREGIR: ' + escHtml(l.motivo) + '</div>' : '') +
+      (u ? '<div style="display:inline-block; margin-top:10px; padding:4px 10px; border-radius:6px; border:1px solid ' + colU + '; color:' + colU + '; font-size:13px; font-weight:800;">📍 ' + escHtml(u.ubic) + ' · ' + u.tipo + '</div>' : '') +
+      '<div style="font-size:12px; color:var(--c-text3); margin-top:6px;">Pedido: ' + l.pedida + ' · ya sacaste ' + _peSumaLinea(l.idLinea) + '</div>', '#C084FC');
+    if (!_pe.plegada) {
+      if (p.sinUbic) {
+        tarjeta += caja('<div style="font-size:14px; font-weight:700; color:#F59E0B;">⚠ No queda de dónde sacar: faltan ' + (l.pedida - _peSumaLinea(l.idLinea)) + '</div><div style="font-size:12px; color:var(--c-text3); margin-top:4px;">Tocá "Saltear (falta)" y poné el motivo.</div>');
+      } else if (!p.ubiOk) {
+        tarjeta += '<div style="font-size:14px; margin-bottom:4px;">📦 Escaneá el código de la ubicación <b>' + escHtml(u.ubic) + '</b></div>';
+      } else {
+        var pct = p.objetivo ? Math.round(p.hechas * 100 / p.objetivo) : 0, ok = p.hechas >= p.objetivo;
+        tarjeta += caja('<div style="display:flex; justify-content:space-between; align-items:baseline;"><span style="font-size:11px; font-weight:700; color:var(--c-text3); letter-spacing:.06em;">UNIDADES SACADAS</span>' +
+          '<span style="font-size:26px; font-weight:800;">' + p.hechas + '<span style="font-size:14px; opacity:.6;"> / ' + p.objetivo + '</span></span></div>' +
+          '<div style="height:8px; background:rgba(255,255,255,0.08); border-radius:4px; margin-top:8px;"><div style="height:8px; width:' + pct + '%; background:#C084FC; border-radius:4px;"></div></div>' +
+          '<div style="font-size:12px; margin-top:6px; color:' + (ok ? '#10B981' : 'var(--c-text3)') + ';">' + (ok ? '☑ Todas las unidades de esta ubicación' : (p.objetivo - p.hechas) + ' restantes') + '</div>');
+      }
     }
-    return '<div class="card" style="margin-bottom:8px; padding:12px 14px; border-left:4px solid ' + color + ';">' +
-      '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">' +
-        '<div><span class="mono" style="font-weight:700;">' + escHtml(l.cod) + '</span> ' + escHtml(l.desc) +
-          (l.estado === 'CORREGIR' ? ' <span style="font-size:11px; font-weight:700; color:#EF4444;">CORREGIR: ' + escHtml(l.motivo) + '</span>' : '') + '</div>' +
-        '<div style="font-size:20px; font-weight:800; color:' + (completa ? '#10B981' : 'var(--c-text)') + ';">' + tot + '<span style="font-size:13px; opacity:.6;">/' + l.pedida + '</span></div>' +
-      '</div>' +
-      '<div style="margin-top:6px;">' + ubis + '</div>' +
-      '<div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">' +
-        (!completa && !falta && _pe.faltaAbierta !== l.idLinea ? '<button class="btn btn-sm" onclick="_pe.faltaAbierta=\'' + escHtml(l.idLinea) + '\'; peRender();">⚠ Saltear (falta)</button>' : '') +
-        (tot ? '<button class="btn btn-sm" onclick="peBorrarLinea(\'' + escHtml(l.idLinea) + '\')">↺ Borrar lo escaneado</button>' : '') +
-      '</div>' + faltaHtml +
-    '</div>';
+    if (p.ubiOk && p.hechas >= p.objetivo) acciones += '<button class="btn" onclick="peContinuar()" style="width:100%; margin-top:6px; padding:12px; font-size:15px; font-weight:700; background:#4CAF7D; color:#fff; border:none;">Confirmar y continuar →</button>';
+    if (!_pe.plegada) {
+      var chicos = '';
+      if (!p.sinUbic && p.hechas < p.objetivo) chicos += '<button class="btn btn-sm" onclick="peNoHayAca()">No hay acá → siguiente ubicación</button>';
+      if (_pe.faltaAbierta !== p.idLinea) chicos += '<button class="btn btn-sm" onclick="_pe.faltaAbierta=\'' + escHtml(p.idLinea) + '\'; peRender();">⚠ Saltear (falta)</button>';
+      if (chicos) acciones += '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">' + chicos + '</div>';
+      if (_pe.faltaAbierta === p.idLinea) {
+        acciones += '<div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">' +
+          '<select id="pe-falta-mot" onchange="document.getElementById(\'pe-falta-otro\').style.display = this.value === \'Otro\' ? \'\' : \'none\'" style="padding:6px 8px; border-radius:6px; background:var(--c-surface); color:var(--c-text); border:1px solid var(--c-border);">' +
+          '<option value="">— ¿Por qué falta? —</option>' + _PE_MOTIVOS.map(function(m) { return '<option>' + m + '</option>'; }).join('') + '</select>' +
+          '<input id="pe-falta-otro" placeholder="Escribí el motivo" style="display:none; padding:6px 8px; border-radius:6px; background:var(--c-surface); color:var(--c-text); border:1px solid var(--c-border);">' +
+          '<button class="btn btn-sm btn-primary" onclick="peFaltaOk(\'' + escHtml(p.idLinea) + '\')">Confirmar falta</button>' +
+          '<button class="btn btn-sm" onclick="_pe.faltaAbierta=\'\'; peRender();">Cancelar</button></div>';
+      }
+    }
+  }
+  document.getElementById('pe-tarjeta').innerHTML = tarjeta;
+  document.getElementById('pe-acciones').innerHTML = acciones;
+  // Resumen (solo lectura + borrar)
+  document.getElementById('pe-lineas').innerHTML = d.lineas.map(function(l) {
+    var tot = _peSumaLinea(l.idLinea), completa = tot >= l.pedida, falta = loc.faltas[l.idLinea], actual = p && p.idLinea === l.idLinea;
+    var color = completa ? '#10B981' : falta ? '#F59E0B' : actual ? '#C084FC' : 'var(--c-border)';
+    var est = completa ? '✅ Completo' : falta ? '⚠ Falta ' + (l.pedida - tot) + ': ' + escHtml(falta) : actual ? '▶ Sacando' : 'Pendiente';
+    var det = Object.keys(loc.tomas[l.idLinea] || {}).map(function(c) { var u = _peUbi(c); return (u ? escHtml(u.ubic) : escHtml(c)) + ': ' + loc.tomas[l.idLinea][c]; }).join(' · ');
+    return '<div class="card" style="margin-bottom:6px; padding:9px 12px; border-left:4px solid ' + color + '; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">' +
+      '<div><span class="mono" style="font-weight:700;">' + escHtml(l.cod) + '</span> <span style="font-size:13px;">' + escHtml(l.desc) + '</span>' +
+        '<div style="font-size:12px; color:' + color + '; margin-top:2px;">' + est + (det ? ' <span style="color:var(--c-text3);">(' + det + ')</span>' : '') + '</div></div>' +
+      '<div style="display:flex; gap:8px; align-items:center;"><span style="font-size:18px; font-weight:800;">' + tot + '<span style="font-size:12px; opacity:.6;">/' + l.pedida + '</span></span>' +
+        (tot || falta ? '<button class="btn btn-sm" title="Empezar de nuevo este artículo" onclick="peBorrarLinea(\'' + escHtml(l.idLinea) + '\')">↺</button>' : '') + '</div></div>';
   }).join('');
   var b = document.getElementById('pe-btn-terminar');
-  if (b) { b.disabled = !listo || _pe.busy; b.style.opacity = b.disabled ? '0.5' : ''; b.title = listo ? '' : 'Completá cada artículo o marcá "Saltear (falta)"'; }
+  if (b) { b.disabled = !!p || _pe.busy; b.style.opacity = b.disabled ? '0.5' : ''; b.title = p ? 'Terminá cada artículo o marcá "Saltear (falta)"' : ''; }
 }
 function peFaltaOk(idl) {
   var m = _val('pe-falta-mot');
   if (m === 'Otro') m = (_val('pe-falta-otro') || '').trim();
   if (!m) { showToast('⚠ Elegí o escribí el motivo'); return; }
   _pe.loc.faltas[idl] = m;
-  _pe.faltaAbierta = '';
-  _peGuardar();
+  _peAvanzar();
+  _peAviso('');
   peRender();
 }
 function peBorrarLinea(idl) {
-  if (!confirm('¿Borrar lo escaneado de este artículo? (volvé a dejar la mercadería y escaneala de nuevo)')) return;
+  if (!confirm('¿Empezar de nuevo este artículo? Se borra lo escaneado (volvé a dejar la mercadería y escaneala otra vez).')) return;
   delete _pe.loc.tomas[idl];
-  _peGuardar();
+  delete _pe.loc.faltas[idl];
+  delete _pe.loc.salt[idl];
+  _peAvanzar();
+  _peAviso('');
   peRender();
 }
 async function peTerminar() {
