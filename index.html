@@ -1910,12 +1910,19 @@
     </div>
     <!-- ═══ PANELES DE PEDIDOS (vacíos, etapa 2) ═══ -->
     <div id="panel-ped-reporte" class="panel">
-      <div class="page-header"><div>
-        <div class="page-title">Reportes de Pedidos</div>
-        <div class="page-sub">Pedidos para asignar a los operarios de pedidos</div>
-      </div></div>
-      <div class="card" style="padding:32px;text-align:center;color:var(--c-text3);">
-        <i class="ti ti-clipboard-list" style="font-size:32px;"></i><div style="margin-top:8px;">Todavía no hay pedidos. (En construcción)</div>
+      <div class="page-header">
+        <div>
+          <div class="page-title">Reportes de Pedidos</div>
+          <div class="page-sub">Pedidos para asignar a los operarios de pedidos</div>
+        </div>
+        <div class="btn-row"><button class="btn" onclick="prCargar()"><i class="ti ti-refresh"></i> Actualizar</button></div>
+      </div>
+      <div id="pr-filtros" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px;"></div>
+      <div id="pr-msg" style="display:none; padding:10px 14px; border-radius:8px; margin-bottom:12px; font-size:13px;"></div>
+      <div id="pr-lista"></div>
+      <div class="card" id="pr-colas-card" style="display:none; margin-top:16px;">
+        <div class="card-title">Fila de cada operario <span style="font-weight:400; font-size:12px; color:var(--c-text3);">(los que no empezaron se pueden mover con ↑ ↓)</span></div>
+        <div id="pr-colas"></div>
       </div>
     </div>
     <div id="panel-ped-control" class="panel">
@@ -2648,6 +2655,7 @@ function switchPanel(name) {
   document.querySelectorAll('.nav-item').forEach(function(b){ b.classList.remove('active'); });
   document.getElementById('panel-' + name).classList.add('active');
   if (name === 'ordenes') syncOrdenes();
+  if (name === 'ped-reporte' && typeof prCargar === 'function') prCargar(); // 1 lectura al entrar (etapa 8)
   if (name === 'reporte-compras') renderReporteCompras();
   if (name === 'carga-remito') { /* ya está renderizado */ }
   if (name === 'completar-control') {
@@ -3643,6 +3651,181 @@ async function pedGuardar() {
   } finally {
     _ped.busy = false;
     if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+  }
+}
+
+// ── REPORTES DE PEDIDOS: lista, detalle, asignar y ordenar (etapa 8, 12/11) ──
+// Lecturas: 1 al entrar o tocar Actualizar, 1 al abrir un pedido. Escrituras: 1 por Asignar / mover.
+var _pr = { datos: null, filtro: 'todos', abierto: '', detalle: null, busy: false };
+var _PR_ASIGNABLE = ['SIN ASIGNAR', 'ASIGNADA', 'DEVUELTA'];
+async function _prGet(q) {
+  var r = await (await fetch(GAS_URL + '?' + q, { cache: 'no-store' })).json();
+  if (!r.ok) throw new Error(r.error || 'error');
+  return r.data;
+}
+async function _prPost(body) {
+  var r = await (await fetch(GAS_URL, { method: 'POST', body: JSON.stringify(body) })).json();
+  if (!r.ok) throw new Error(r.error || 'error');
+  return r.data;
+}
+function _prMsg(m, err) {
+  var el = document.getElementById('pr-msg');
+  if (!el) return;
+  el.textContent = m || '';
+  el.style.display = m ? '' : 'none';
+  el.style.background = err ? 'rgba(239,68,68,0.12)' : 'var(--c-surface2)';
+  el.style.color = err ? '#EF4444' : 'var(--c-text2)';
+}
+async function prCargar() {
+  _prMsg('Cargando pedidos…');
+  try {
+    _pr.datos = await _prGet('accion=pedidosLista');
+    _prMsg('');
+  } catch (e) {
+    _prMsg('No se pudieron leer los pedidos: ' + e.message, true);
+    return;
+  }
+  _pr.abierto = '';
+  _pr.detalle = null;
+  prRender();
+}
+function prFiltro(f) { _pr.filtro = f; prRender(); }
+function _prColor(e) { return { 'CARGADO': '#F59E0B', 'EN CURSO': '#3B82F6', 'COMPLETO': '#10B981' }[e] || '#8b949e'; }
+function _prFecha(s) { var d = new Date(s); return isNaN(d) ? '' : d.toLocaleDateString('es-AR') + ' ' + d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }); }
+function prRender() {
+  var d = _pr.datos;
+  if (!d) return;
+  var ped = d.pedidos || [];
+  var sinAsig = function(p) { return (p.porOp['SIN ASIGNAR'] || 0) > 0; };
+  var filtros = [
+    ['todos', 'Todos', ped.length],
+    ['sin', 'Sin asignar', ped.filter(sinAsig).length],
+    ['curso', 'En curso', ped.filter(function(p) { return p.estado === 'EN CURSO'; }).length],
+    ['comp', 'Completos hoy', ped.filter(function(p) { return p.estado === 'COMPLETO'; }).length]
+  ];
+  document.getElementById('pr-filtros').innerHTML = filtros.map(function(f) {
+    return '<button class="btn btn-sm' + (_pr.filtro === f[0] ? ' btn-primary' : '') + '" onclick="prFiltro(\'' + f[0] + '\')">' + f[1] + ' (' + f[2] + ')</button>';
+  }).join('');
+  var lista = ped.filter(function(p) {
+    if (_pr.filtro === 'sin') return sinAsig(p);
+    if (_pr.filtro === 'curso') return p.estado === 'EN CURSO';
+    if (_pr.filtro === 'comp') return p.estado === 'COMPLETO';
+    return true;
+  });
+  var html = lista.length ? '' : '<div class="card" style="padding:28px; text-align:center; color:var(--c-text3);">No hay pedidos en este filtro.</div>';
+  lista.forEach(function(p) {
+    var quien = Object.keys(p.porOp).map(function(k) {
+      return (k === 'SIN ASIGNAR' ? '<span style="color:#F59E0B;">sin asignar ' + p.porOp[k] + '</span>' : escHtml(k) + ' ' + p.porOp[k]);
+    }).join(' · ');
+    var abierto = _pr.abierto === p.id;
+    html += '<div class="card" style="margin-bottom:10px; padding:14px 16px; border-left:4px solid ' + _prColor(p.estado) + ';">' +
+      '<div onclick="prAbrir(\'' + escHtml(p.id) + '\')" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">' +
+        '<div><span style="font-weight:800; font-size:16px; color:#C084FC;">N° ' + escHtml(p.nro) + '</span> ' +
+          '<span style="font-weight:600;">' + escHtml(p.cliente) + '</span>' +
+          '<div style="font-size:12px; color:var(--c-text3); margin-top:3px;">' + _prFecha(p.fecha) + (p.hojas ? ' · ' + escHtml(p.hojas) + ' hoja(s)' : '') + ' · ' + p.lineas + ' artículo(s) · ' + escHtml(p.evento) + '</div></div>' +
+        '<div style="text-align:right;"><span style="font-size:11px; font-weight:700; padding:3px 8px; border-radius:6px; background:' + _prColor(p.estado) + '22; color:' + _prColor(p.estado) + ';">' + escHtml(p.estado) + '</span>' +
+          '<div style="font-size:12px; margin-top:4px;">' + quien + ' <i class="ti ti-chevron-' + (abierto ? 'up' : 'down') + '"></i></div></div>' +
+      '</div>' +
+      (abierto ? '<div style="margin-top:12px; border-top:1px solid var(--c-border); padding-top:12px;">' + _prDetalleHtml(_pr.detalle) + '</div>' : '') +
+    '</div>';
+  });
+  document.getElementById('pr-lista').innerHTML = html;
+  _prRenderColas();
+}
+function _prDetalleHtml(det) {
+  if (!det) return '<div style="color:var(--c-text3); font-size:13px;">Cargando artículos…</div>';
+  if (det.error) return '<div style="color:#EF4444; font-size:13px;">No se pudo leer el pedido: ' + escHtml(det.error) + '</div>';
+  var ops = det.operarios || [];
+  var sel = '<select id="pr-op-sel" style="padding:7px 10px; border-radius:6px; background:var(--c-surface); color:var(--c-text); border:1px solid var(--c-border);">' +
+    '<option value="">— Elegí operario —</option>' + ops.map(function(o) { return '<option value="' + escHtml(o) + '">' + escHtml(o) + '</option>'; }).join('') + '</select>';
+  var filas = det.lineas.map(function(l) {
+    var asig = _PR_ASIGNABLE.indexOf(l.estado) > -1;
+    return '<tr' + (l.estado === 'ANULADA' ? ' style="opacity:0.45;"' : '') + '>' +
+      '<td>' + (asig ? '<input type="checkbox" class="pr-chk" value="' + escHtml(l.idLinea) + '" style="width:18px; height:18px;">' : '') + '</td>' +
+      '<td>' + escHtml(l.hoja) + '</td><td class="mono">' + escHtml(l.cod) + '</td><td>' + escHtml(l.desc) + '</td>' +
+      '<td style="text-align:center;">' + l.pedida + '</td>' +
+      '<td style="font-size:12px;">' + escHtml(l.estado) + (asig || l.estado === 'ANULADA' ? '' : ' 🔒') + '</td>' +
+      '<td style="font-size:12px;">' + escHtml(l.operario || '—') + '</td></tr>';
+  }).join('');
+  return '<div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">' + sel +
+      '<button class="btn btn-sm btn-primary" onclick="prAsignar(\'todo\')"><i class="ti ti-users"></i> Todo el pedido a este operario</button>' +
+      '<button class="btn btn-sm" onclick="prAsignar(\'marcadas\')"><i class="ti ti-checkbox"></i> Asignar los marcados</button>' +
+      '<button class="btn btn-sm" onclick="prAsignar(\'quitar\')"><i class="ti ti-user-x"></i> Quitar asignación a los marcados</button>' +
+    '</div>' +
+    '<div class="table-wrap"><table><thead><tr><th></th><th>Hoja</th><th>Código</th><th>Descripción</th><th style="text-align:center;">Pedida</th><th>Estado</th><th>Operario</th></tr></thead><tbody>' + filas + '</tbody></table></div>';
+}
+async function prAbrir(id) {
+  if (_pr.abierto === id) { _pr.abierto = ''; _pr.detalle = null; prRender(); return; }
+  _pr.abierto = id;
+  _pr.detalle = null;
+  prRender();
+  try { _pr.detalle = await _prGet('accion=pedidoDetalle&id=' + encodeURIComponent(id)); }
+  catch (e) { _pr.detalle = { error: e.message }; }
+  if (_pr.abierto === id) prRender();
+}
+async function prAsignar(modo) {
+  var det = _pr.detalle;
+  if (_pr.busy || !det || !det.lineas) return;
+  var op = _val('pr-op-sel');
+  if (modo !== 'quitar' && !op) { showToast('⚠ Elegí el operario'); return; }
+  var ls = det.lineas.filter(function(l) { return _PR_ASIGNABLE.indexOf(l.estado) > -1; });
+  if (modo !== 'todo') {
+    var marc = Array.prototype.map.call(document.querySelectorAll('.pr-chk:checked'), function(c) { return c.value; });
+    ls = ls.filter(function(l) { return marc.indexOf(l.idLinea) > -1; });
+    if (!ls.length) { showToast('⚠ Marcá al menos un artículo'); return; }
+  }
+  if (modo === 'quitar') ls = ls.filter(function(l) { return l.estado === 'ASIGNADA'; });
+  if (!ls.length) { showToast('⚠ No hay artículos para cambiar'); return; }
+  _pr.busy = true;
+  showToast('Guardando…');
+  try {
+    var r = await _prPost({ accion: 'asignarLineas', usuario: (CURRENT_USER && CURRENT_USER.name) || '',
+      asignaciones: ls.map(function(l) { return { idLinea: l.idLinea, operario: modo === 'quitar' ? '' : op }; }) });
+    showToast('✅ ' + r.cambiadas + ' artículo(s) ' + (modo === 'quitar' ? 'sin asignar' : 'asignado(s) a ' + op));
+    await prCargar();
+  } catch (e) {
+    _prMsg('No se asignó: ' + e.message, true);
+  } finally {
+    _pr.busy = false;
+  }
+}
+function _prRenderColas() {
+  var colas = (_pr.datos && _pr.datos.colas) || {};
+  var ops = Object.keys(colas).filter(function(o) { return colas[o].length; });
+  var card = document.getElementById('pr-colas-card');
+  if (!card) return;
+  card.style.display = ops.length ? '' : 'none';
+  document.getElementById('pr-colas').innerHTML = ops.map(function(op) {
+    var movibles = colas[op].filter(function(q) { return !q.empezada; });
+    return '<div style="margin-bottom:12px;"><div style="font-weight:700; margin-bottom:6px;">' + escHtml(op) + '</div>' +
+      '<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">' +
+      colas[op].map(function(q, i) {
+        var k = movibles.indexOf(q);
+        var flechas = q.empezada ? '<span style="font-size:11px; color:#3B82F6;">▶ en curso</span>' :
+          (k > 0 ? '<button class="btn btn-sm" style="padding:2px 6px;" onclick="prMover(\'' + escHtml(op) + '\',\'' + escHtml(q.idPedido) + '\',-1)">↑</button>' : '') +
+          (k < movibles.length - 1 ? '<button class="btn btn-sm" style="padding:2px 6px;" onclick="prMover(\'' + escHtml(op) + '\',\'' + escHtml(q.idPedido) + '\',1)">↓</button>' : '');
+        return (i ? '<span style="color:var(--c-text3);">→</span>' : '') +
+          '<span style="display:inline-flex; gap:4px; align-items:center; background:var(--c-surface2); border:1px solid var(--c-border); border-radius:8px; padding:4px 8px; font-size:13px;">' +
+          '<b>N° ' + escHtml(q.nro) + '</b> ' + escHtml(q.cliente) + ' ' + flechas + '</span>';
+      }).join('') + '</div></div>';
+  }).join('');
+}
+async function prMover(op, idPedido, dir) {
+  if (_pr.busy) return;
+  var cola = ((_pr.datos && _pr.datos.colas) || {})[op] || [];
+  var ids = cola.filter(function(q) { return !q.empezada; }).map(function(q) { return q.idPedido; });
+  var i = ids.indexOf(idPedido), j = i + dir;
+  if (i < 0 || j < 0 || j >= ids.length) return;
+  ids[i] = ids[j]; ids[j] = idPedido;
+  _pr.busy = true;
+  try {
+    await _prPost({ accion: 'reordenarPedidos', operario: op, idsPedido: ids });
+    showToast('✅ Orden de ' + op + ' actualizado');
+    await prCargar();
+  } catch (e) {
+    _prMsg('No se cambió el orden: ' + e.message, true);
+  } finally {
+    _pr.busy = false;
   }
 }
 
