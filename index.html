@@ -1917,6 +1917,10 @@
         </div>
         <div class="btn-row"><button class="btn" onclick="prCargar()"><i class="ti ti-refresh"></i> Actualizar</button></div>
       </div>
+      <div class="card" id="pr-alertas-card" style="display:none; margin-bottom:14px; padding:14px 16px; border-left:4px solid #EF4444;">
+        <div class="card-title" style="margin-bottom:8px;">🔔 Alertas</div>
+        <div id="pr-alertas"></div>
+      </div>
       <div id="pr-filtros" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px;"></div>
       <div id="pr-msg" style="display:none; padding:10px 14px; border-radius:8px; margin-bottom:12px; font-size:13px;"></div>
       <div id="pr-lista"></div>
@@ -2709,6 +2713,7 @@ function updateClock() {
  function revisarAlertas() {
   if (!CURRENT_USER) return;
   if (CURRENT_USER.rol === 'operario_pedidos') { switchPanel('mis-pedidos'); return; } // 1 lectura (misPedidos), avisa las novedades
+  if (CURRENT_USER.rol === 'supervisor_pedidos') { _pr.avisar = true; switchPanel('ped-reporte'); return; } // 1 lectura (alertasSup)
   if (_esRolPedidos(CURRENT_USER.rol)) { showToast('Sin alertas de pedidos por ahora'); return; } // 0 lecturas
   if (CURRENT_USER.rol === 'operario') {
         _retryIntentos = 0; _retryEnCursoAlerta = null;
@@ -3660,7 +3665,7 @@ async function pedGuardar() {
 
 // ── REPORTES DE PEDIDOS: lista, detalle, asignar y ordenar (etapa 8, 12/11) ──
 // Lecturas: 1 al entrar o tocar Actualizar, 1 al abrir un pedido. Escrituras: 1 por Asignar / mover.
-var _pr = { datos: null, filtro: 'todos', abierto: '', detalle: null, busy: false };
+var _pr = { datos: null, filtro: 'todos', abierto: '', detalle: null, busy: false, avisar: false };
 var _PR_ASIGNABLE = ['SIN ASIGNAR', 'ASIGNADA', 'DEVUELTA'];
 async function _prGet(q) {
   var r = await (await fetch(GAS_URL + '?' + q, { cache: 'no-store' })).json();
@@ -3683,15 +3688,49 @@ function _prMsg(m, err) {
 async function prCargar() {
   _prMsg('Cargando pedidos…');
   try {
-    _pr.datos = await _prGet('accion=pedidosLista');
+    var dat = await _prGet('accion=alertasSup');
+    if (!dat || !dat.pedidos) dat = await _prGet('accion=pedidosLista'); // GAS sin la etapa 8b todavía
+    _pr.datos = dat;
     _prMsg('');
   } catch (e) {
+    _pr.avisar = false;
     _prMsg('No se pudieron leer los pedidos: ' + e.message, true);
     return;
   }
   _pr.abierto = '';
   _pr.detalle = null;
   prRender();
+  if (_pr.avisar) {
+    _pr.avisar = false;
+    var a = _pr.datos.alertas || {};
+    var n = ['esperando', 'devueltos', 'faltantes', 'sinAsignar'].reduce(function(s, k) { return s + ((a[k] || []).length); }, 0);
+    showToast(n ? '🔔 ' + n + ' alerta(s) de pedidos' : 'Sin alertas de pedidos');
+  }
+}
+function _prRenderAlertas() {
+  var card = document.getElementById('pr-alertas-card');
+  if (!card) return;
+  var a = (_pr.datos && _pr.datos.alertas) || null;
+  var ir = function(id) { return ' onclick="prIrA(\'' + escHtml(id) + '\')" style="cursor:pointer; padding:7px 10px; border-radius:6px; background:var(--c-surface2); margin-bottom:5px; font-size:13px;"'; };
+  var ped = function(x) { return '<b style="color:#C084FC;">N° ' + escHtml(x.nro) + '</b> ' + escHtml(x.cliente); };
+  var sec = function(titulo, color, items, fn) {
+    if (!items || !items.length) return '';
+    return '<div style="margin-bottom:10px;"><div style="font-size:12px; font-weight:800; color:' + color + '; margin-bottom:5px;">' + titulo + ' (' + items.length + ')</div>' +
+      items.map(function(x) { return '<div' + ir(x.idPedido) + '>' + fn(x) + '</div>'; }).join('') + '</div>';
+  };
+  var html = !a ? '' :
+    sec('⏳ ESPERANDO CONTROL DE FECHAS', '#A855F7', a.esperando, function(x) { return ped(x) + ' — <b>' + escHtml(x.operario) + '</b> espera hace <b>' + x.minutos + ' min</b> (' + x.lineas + ' art.)'; }) +
+    sec('↩ DEVUELTOS (reasignar)', '#EF4444', a.devueltos, function(x) { return ped(x) + ' — devuelto por ' + escHtml(x.operario || '?') + ': <i>' + escHtml(x.motivo) + '</i> (' + x.lineas + ' art.)'; }) +
+    sec('⚠ FALTANTES', '#F59E0B', a.faltantes, function(x) { return ped(x) + ' — <span class="mono">' + escHtml(x.cod) + '</span>: <i>' + escHtml(x.motivo) + '</i>' + (x.operario ? ' (' + escHtml(x.operario) + ')' : ''); }) +
+    sec('🆕 SIN ASIGNAR', '#3B82F6', a.sinAsignar, function(x) { return ped(x) + ' — ' + x.lineas + ' art. sin asignar'; }) +
+    sec('✅ COMPLETOS HOY', '#10B981', a.completosHoy, function(x) { return ped(x); });
+  card.style.display = html ? '' : 'none';
+  document.getElementById('pr-alertas').innerHTML = html;
+}
+function prIrA(id) {
+  _pr.filtro = 'todos';
+  if (_pr.abierto !== id) prAbrir(id); else prRender();
+  setTimeout(function() { var c = document.getElementById('pr-card-' + id); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
 }
 function prFiltro(f) { _pr.filtro = f; prRender(); }
 function _prColor(e) { return { 'CARGADO': '#F59E0B', 'EN CURSO': '#3B82F6', 'COMPLETO': '#10B981' }[e] || '#8b949e'; }
@@ -3722,7 +3761,7 @@ function prRender() {
       return (k === 'SIN ASIGNAR' ? '<span style="color:#F59E0B;">sin asignar ' + p.porOp[k] + '</span>' : escHtml(k) + ' ' + p.porOp[k]);
     }).join(' · ');
     var abierto = _pr.abierto === p.id;
-    html += '<div class="card" style="margin-bottom:10px; padding:14px 16px; border-left:4px solid ' + _prColor(p.estado) + ';">' +
+    html += '<div class="card" id="pr-card-' + escHtml(p.id) + '" style="margin-bottom:10px; padding:14px 16px; border-left:4px solid ' + _prColor(p.estado) + ';">' +
       '<div onclick="prAbrir(\'' + escHtml(p.id) + '\')" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">' +
         '<div><span style="font-weight:800; font-size:16px; color:#C084FC;">N° ' + escHtml(p.nro) + '</span> ' +
           '<span style="font-weight:600;">' + escHtml(p.cliente) + '</span>' +
@@ -3735,6 +3774,7 @@ function prRender() {
   });
   document.getElementById('pr-lista').innerHTML = html;
   _prRenderColas();
+  _prRenderAlertas();
 }
 function _prDetalleHtml(det) {
   if (!det) return '<div style="color:var(--c-text3); font-size:13px;">Cargando artículos…</div>';
