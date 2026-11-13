@@ -1934,13 +1934,15 @@
       </div>
     </div>
     <div id="panel-ped-control" class="panel">
-      <div class="page-header"><div>
-        <div class="page-title">Escaneos</div>
-        <div class="page-sub">Pedidos sacados, esperando control de fechas</div>
-      </div></div>
-      <div class="card" style="padding:32px;text-align:center;color:var(--c-text3);">
-        <i class="ti ti-calendar-check" style="font-size:32px;"></i><div style="margin-top:8px;">Nada para controlar. (En construcción)</div>
+      <div class="page-header">
+        <div>
+          <div class="page-title">Escaneos</div>
+          <div class="page-sub" id="pc-sub">Pedidos sacados, esperando control de fechas</div>
+        </div>
+        <div class="btn-row"><button class="btn" onclick="pcCargar()"><i class="ti ti-refresh"></i> Actualizar</button></div>
       </div>
+      <div id="pc-msg" style="display:none; padding:10px 14px; border-radius:8px; margin-bottom:12px; font-size:13px;"></div>
+      <div id="pc-cont"></div>
     </div>
     <div id="panel-ped-escaneo" class="panel">
       <div class="page-header">
@@ -2690,6 +2692,7 @@ function switchPanel(name) {
   if (name === 'ped-reporte' && typeof prCargar === 'function') prCargar(); // 1 lectura al entrar (etapa 8)
   if (name === 'mis-pedidos' && typeof mpCargar === 'function') mpCargar(); // 1 lectura al entrar (etapa 9)
   if (name === 'ped-escaneo' && typeof peAbrir === 'function') peAbrir(); // 1 lectura al entrar (etapa 10)
+  if (name === 'ped-control' && typeof pcCargar === 'function') pcCargar(); // 1 lectura al entrar (etapa 11)
   if (name === 'reporte-compras') renderReporteCompras();
   if (name === 'carga-remito') { /* ya está renderizado */ }
   if (name === 'completar-control') {
@@ -3944,6 +3947,182 @@ async function prMover(op, idPedido, dir) {
     _prMsg('No se cambió el orden: ' + e.message, true);
   } finally {
     _pr.busy = false;
+  }
+}
+
+// ── ESCANEOS de Matías: control de fechas (etapa 11, 13/11) ──
+// Lecturas: 1 al entrar o tocar Actualizar (alertasSup), 1 al abrir un pedido (pedidoControl). Escritura: 1 al confirmar.
+var _pc = { lista: null, parte: null, busy: false, rech: {}, val: {}, mot: {} };
+function _pcMsg(m, err) {
+  var el = document.getElementById('pc-msg');
+  if (!el) return;
+  el.textContent = m || '';
+  el.style.display = m ? '' : 'none';
+  el.style.background = err ? 'rgba(239,68,68,0.12)' : 'var(--c-surface2)';
+  el.style.color = err ? '#EF4444' : 'var(--c-text2)';
+}
+async function pcCargar() {
+  _pc.parte = null;
+  _pcMsg('Cargando…');
+  try {
+    var dat = await _prGet('accion=alertasSup');
+    _pc.lista = (dat && dat.alertas && dat.alertas.esperando) || [];
+    _pcMsg('');
+  } catch (e) {
+    _pcMsg('No se pudo leer: ' + e.message, true);
+    return;
+  }
+  _pcRender();
+}
+function _pcRender() {
+  var c = document.getElementById('pc-cont');
+  if (!c) return;
+  var sub = document.getElementById('pc-sub');
+  if (_pc.parte) {
+    if (sub) sub.textContent = 'Control de fechas — N° ' + _pc.parte.nro + ' de ' + _pc.parte.operario;
+    c.innerHTML = _pcParteHtml(_pc.parte);
+    return;
+  }
+  if (sub) sub.textContent = 'Pedidos sacados, esperando control de fechas';
+  var l = _pc.lista || [];
+  if (!l.length) {
+    c.innerHTML = '<div class="card" style="padding:32px;text-align:center;color:var(--c-text3);"><i class="ti ti-calendar-check" style="font-size:32px;"></i><div style="margin-top:8px;">Nada para controlar.</div></div>';
+    return;
+  }
+  c.innerHTML = l.map(function(x, n) {
+    return '<div class="card" onclick="pcAbrir(' + n + ')" style="cursor:pointer; margin-bottom:10px; padding:14px 16px; border-left:4px solid #A855F7; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">' +
+      '<div><span style="font-weight:800; font-size:16px; color:#C084FC;">N° ' + escHtml(x.nro) + '</span> <span style="font-weight:600;">' + escHtml(x.cliente) + '</span>' +
+      '<div style="font-size:12px; color:var(--c-text3); margin-top:3px;"><b>' + escHtml(x.operario) + '</b> · ' + x.lineas + ' artículo(s) para controlar</div></div>' +
+      '<div style="text-align:right;"><span style="font-size:12px; font-weight:700; padding:3px 9px; border-radius:6px; background:#A855F722; color:#A855F7;">⏳ espera hace ' + x.minutos + ' min</span>' +
+      '<div style="margin-top:6px;"><span class="btn btn-sm btn-primary">Controlar <i class="ti ti-chevron-right"></i></span></div></div></div>';
+  }).join('');
+}
+async function pcAbrir(n) {
+  var x = (_pc.lista || [])[n];
+  if (!x || _pc.busy) return;
+  _pcMsg('Abriendo el pedido N° ' + x.nro + '…');
+  try {
+    _pc.parte = await _prGet('accion=pedidoControl&id=' + encodeURIComponent(x.idPedido) + '&operario=' + encodeURIComponent(x.operario));
+    _pc.rech = {}; _pc.val = {}; _pc.mot = {};
+    _pcMsg('');
+  } catch (e) {
+    _pcMsg('No se pudo abrir: ' + e.message, true);
+    return;
+  }
+  _pcRender();
+}
+function pcVolver() { _pc.parte = null; _pcMsg(''); _pcRender(); }
+// Guarda lo tipeado antes de redibujar (al marcar "Fecha no sirve" no se pierde nada)
+function _pcLeerInputs() {
+  document.querySelectorAll('.pc-q').forEach(function(el) { _pc.val[el.id] = el.value; });
+  document.querySelectorAll('.pc-mot').forEach(function(el) { _pc.mot[el.dataset.l] = el.value; });
+}
+function pcRechazar(a) {
+  var l = _pc.parte && _pc.parte.lineas[a];
+  if (!l) return;
+  _pcLeerInputs();
+  _pc.rech[l.idLinea] = !_pc.rech[l.idLinea];
+  _pcRender();
+}
+function _pcParteHtml(p) {
+  var aCtrl = p.lineas.filter(function(l) { return l.estado === 'PARA CONTROL'; });
+  var unid = aCtrl.reduce(function(s, l) { return s + (l.sacada || 0); }, 0);
+  var falt = p.lineas.filter(function(l) { return l.estado === 'FALTANTE'; }).length;
+  var met = function(lbl, v, cls) { return '<div class="metric-card' + (cls ? ' ' + cls : '') + '"><div class="metric-label">' + lbl + '</div><div class="metric-val">' + v + '</div></div>'; };
+  var html = '<div class="card" style="margin-bottom:12px; padding:12px 16px; border-left:4px solid #C084FC; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">' +
+      '<div><span style="font-weight:800; font-size:18px; color:#C084FC;">N° ' + escHtml(p.nro) + '</span> <span style="font-weight:600;">' + escHtml(p.cliente) + '</span>' +
+      '<div style="font-size:12px; color:var(--c-text3); margin-top:3px;">Sacado por <b>' + escHtml(p.operario) + '</b></div></div>' +
+      '<button class="btn btn-sm" onclick="pcVolver()"><i class="ti ti-arrow-left"></i> Volver</button></div>' +
+    '<div class="metrics-grid">' + met('Artículos', p.lineas.length) + met('Para controlar', aCtrl.length) + met('Unidades sacadas', unid, 'metric-ok') + met('Faltantes', falt, 'metric-warn') + '</div>' +
+    '<div class="card" style="padding:0; overflow:hidden; margin-top:12px;"><div style="padding:12px 16px; font-weight:700; border-bottom:1px solid var(--c-border);">Estado de líneas</div>';
+  p.lineas.forEach(function(l, a) {
+    var rech = !!_pc.rech[l.idLinea];
+    var col = { 'PARA CONTROL': '#A855F7', 'CONTROLADA': '#10B981', 'FALTANTE': '#F59E0B', 'CORREGIR': '#EF4444' }[l.estado] || '#8b949e';
+    html += '<div style="padding:12px 16px; border-bottom:1px solid var(--c-border);">' +
+      '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">' +
+        '<div><span class="mono" style="font-weight:700;">' + escHtml(l.cod) + '</span> ' + escHtml(l.desc) +
+          '<div style="font-size:12px; color:var(--c-text3); margin-top:2px;">Hoja ' + escHtml(l.hoja || '—') + ' · pedida <b>' + l.pedida + '</b> · sacada <b>' + l.sacada + '</b>' +
+          (l.motivo ? ' · <span style="color:#F59E0B;">' + escHtml(l.motivo) + '</span>' : '') + '</div></div>' +
+        '<span style="font-size:11px; font-weight:700; padding:3px 8px; border-radius:6px; background:' + col + '22; color:' + col + ';">' + escHtml(rech ? 'FECHA NO SIRVE' : l.estado) + '</span>' +
+      '</div>';
+    if (l.estado === 'PARA CONTROL') {
+      html += '<div style="' + (rech ? 'opacity:0.35; pointer-events:none;' : '') + '">';
+      l.sacado.filter(function(s) { return s.estado === 'SACADO'; }).forEach(function(s, b) {
+        var tc = s.tipo === 'PICKING' ? '#10B981' : '#3B82F6';
+        html += '<div style="margin-top:10px; padding:10px 12px; border-radius:8px; background:var(--c-surface2);">' +
+          '<div style="font-size:13px; margin-bottom:6px;"><span style="font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; background:' + tc + '22; color:' + tc + ';">' + escHtml(s.tipo) + '</span> ' +
+          '<span class="mono">' + escHtml(s.ubicacion) + '</span> — sacó <b>' + s.cant + '</b>. ¿De qué lote?</div>';
+        if (!s.lotes.length) {
+          html += '<div style="font-size:13px; color:#EF4444;">⛔ En esta ubicación no figura ningún lote con saldo. Marcá "Fecha no sirve" o pedí un ajuste.</div>';
+        } else {
+          s.lotes.forEach(function(L, c) {
+            var id = 'pc-q-' + a + '-' + b + '-' + c;
+            var v = _pc.val[id] !== undefined ? _pc.val[id] : (s.lotes.length === 1 ? String(Math.min(s.cant, L.disponible)) : '');
+            html += '<div style="display:flex; align-items:center; gap:10px; margin-top:5px; font-size:13px;">' +
+              '<input type="number" min="0" class="pc-q" id="' + id + '" value="' + escHtml(v) + '" placeholder="0" style="width:80px; text-align:center; padding:6px;">' +
+              '<span>lote <b class="mono">' + escHtml(L.lote) + '</b> · vence <b>' + escHtml(L.fecha || '—') + '</b> · <span style="color:var(--c-text3);">disponible ' + L.disponible + '</span></span></div>';
+          });
+        }
+        html += '</div>';
+      });
+      html += '</div><div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">' +
+        '<button class="btn btn-sm" onclick="pcRechazar(' + a + ')" style="color:#EF4444; border-color:#EF4444;">' + (rech ? '↺ Sí sirve' : '✖ Fecha no sirve') + '</button>' +
+        (rech ? '<input type="text" class="pc-mot" data-l="' + escHtml(l.idLinea) + '" value="' + escHtml(_pc.mot[l.idLinea] || '') + '" placeholder="Motivo (obligatorio): ej. vence muy pronto" style="flex:1; min-width:200px; padding:6px 10px;">' : '') +
+        '</div>';
+    } else if (l.estado === 'CONTROLADA') {
+      html += '<div style="font-size:12px; color:#10B981; margin-top:6px;">✓ ' + l.sacado.filter(function(s) { return s.estado === 'CONTROLADO'; }).map(function(s) {
+        return s.cant + ' del lote ' + escHtml(s.lote) + ' (' + escHtml(s.fecha) + ') en ' + escHtml(s.ubicacion);
+      }).join(' · ') + '</div>';
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  if (aCtrl.length) {
+    html += '<div style="display:flex; justify-content:flex-end; margin-top:14px;"><button class="btn btn-primary" id="pc-btn-ok" onclick="pcConfirmar()"><i class="ti ti-check"></i> Confirmar control</button></div>';
+  }
+  return html;
+}
+async function pcConfirmar() {
+  var p = _pc.parte;
+  if (!p || _pc.busy) return;
+  _pcLeerInputs();
+  var lotes = [], rechazos = [];
+  for (var a = 0; a < p.lineas.length; a++) {
+    var l = p.lineas[a];
+    if (l.estado !== 'PARA CONTROL') continue;
+    if (_pc.rech[l.idLinea]) {
+      var m = (_pc.mot[l.idLinea] || '').trim();
+      if (!m) { _pcMsg('⚠ ' + l.cod + ': escribí por qué la fecha no sirve', true); return; }
+      rechazos.push({ idLinea: l.idLinea, motivo: m });
+      continue;
+    }
+    var sacs = l.sacado.filter(function(s) { return s.estado === 'SACADO'; });
+    for (var b = 0; b < sacs.length; b++) {
+      var s = sacs[b], partes = [], suma = 0;
+      for (var c = 0; c < s.lotes.length; c++) {
+        var q = parseInt(_pc.val['pc-q-' + a + '-' + b + '-' + c], 10) || 0;
+        if (q < 0) { _pcMsg('⚠ ' + l.cod + ': cantidad inválida', true); return; }
+        if (q > s.lotes[c].disponible) { _pcMsg('⚠ ' + l.cod + ': del lote ' + s.lotes[c].lote + ' hay ' + s.lotes[c].disponible + ' disponibles', true); return; }
+        if (q > 0) { partes.push({ lote: s.lotes[c].lote, cant: q }); suma += q; }
+      }
+      if (suma !== s.cant) { _pcMsg('⚠ ' + l.cod + ' (' + s.ubicacion + '): los lotes suman ' + suma + ' y se sacaron ' + s.cant, true); return; }
+      lotes.push({ idSacado: s.idSacado, partes: partes });
+    }
+  }
+  _pc.busy = true;
+  var btn = document.getElementById('pc-btn-ok');
+  if (btn) btn.disabled = true;
+  _pcMsg('Guardando el control…');
+  try {
+    var r = await _prPost({ accion: 'controlarParte', idPedido: p.idPedido, operario: p.operario, usuario: (CURRENT_USER && CURRENT_USER.name) || '', lotes: lotes, rechazos: rechazos });
+    showToast(r.ya ? 'Ese pedido ya estaba controlado' : '✅ N° ' + p.nro + ': ' + r.controladas + ' aprobado(s)' + (r.rechazadas ? ', ' + r.rechazadas + ' devuelto(s) a ' + p.operario + ' para corregir' : ''));
+    _pc.busy = false;
+    await pcCargar();
+  } catch (e) {
+    _pcMsg('No se guardó el control: ' + e.message, true);
+    if (btn) btn.disabled = false;
+  } finally {
+    _pc.busy = false;
   }
 }
 
