@@ -4103,7 +4103,7 @@ function _pcParteHtml(p) {
             var opts = '<option value="">— elegí el lote —</option>' + s.lotes.map(function(L) {
               var usado = usados.indexOf(L.lote) >= 0;
               return '<option value="' + escHtml(L.lote) + '"' + (f.lote === L.lote ? ' selected' : '') + (usado ? ' disabled' : '') + '>' +
-                escHtml(L.lote) + ' · vence ' + escHtml(L.fecha || '—') + ' · hay ' + L.disponible + '</option>';
+                escHtml(L.lote) + ' · vence ' + escHtml(L.fecha || '—') + '</option>';
             }).join('');
             if (f.lote) asig += parseInt(f.cant, 10) || 0;
             html += '<div style="display:flex; align-items:center; gap:8px; margin-top:6px; font-size:13px; flex-wrap:wrap;">' +
