@@ -3952,7 +3952,7 @@ async function prMover(op, idPedido, dir) {
 
 // ── ESCANEOS de Matías: control de fechas (etapa 11, 13/11) ──
 // Lecturas: 1 al entrar o tocar Actualizar (alertasSup), 1 al abrir un pedido (pedidoControl). Escritura: 1 al confirmar.
-var _pc = { lista: null, parte: null, busy: false, rech: {}, val: {}, mot: {} };
+var _pc = { lista: null, parte: null, busy: false, rech: {}, val: {}, mot: {}, filas: {} };
 function _pcMsg(m, err) {
   var el = document.getElementById('pc-msg');
   if (!el) return;
@@ -4003,7 +4003,7 @@ async function pcAbrir(n) {
   _pcMsg('Abriendo el pedido N° ' + x.nro + '…');
   try {
     _pc.parte = await _prGet('accion=pedidoControl&id=' + encodeURIComponent(x.idPedido) + '&operario=' + encodeURIComponent(x.operario));
-    _pc.rech = {}; _pc.val = {}; _pc.mot = {};
+    _pc.rech = {}; _pc.val = {}; _pc.mot = {}; _pc.filas = {};
     _pcMsg('');
   } catch (e) {
     _pcMsg('No se pudo abrir: ' + e.message, true);
@@ -4014,8 +4014,49 @@ async function pcAbrir(n) {
 function pcVolver() { _pc.parte = null; _pcMsg(''); _pcRender(); }
 // Guarda lo tipeado antes de redibujar (al marcar "Fecha no sirve" no se pierde nada)
 function _pcLeerInputs() {
-  document.querySelectorAll('.pc-q').forEach(function(el) { _pc.val[el.id] = el.value; });
+  document.querySelectorAll('.pc-sl').forEach(function(el) { var r = (_pc.filas[el.dataset.k] || [])[el.dataset.i]; if (r) r.lote = el.value; });
+  document.querySelectorAll('.pc-sq').forEach(function(el) { var r = (_pc.filas[el.dataset.k] || [])[el.dataset.i]; if (r) r.cant = el.value; });
   document.querySelectorAll('.pc-mot').forEach(function(el) { _pc.mot[el.dataset.l] = el.value; });
+}
+// Filas lote+cantidad de un sacado (a = línea, b = sacado). Arranca con 1 fila; con un solo lote, ya elegido.
+function _pcFilas(a, b, s) {
+  var k = a + '-' + b;
+  if (!_pc.filas[k]) {
+    _pc.filas[k] = s.lotes.length === 1 ? [{ lote: s.lotes[0].lote, cant: String(Math.min(s.cant, s.lotes[0].disponible)) }] : [{ lote: '', cant: '' }];
+    _pcNormalizar(k, s);
+  }
+  return _pc.filas[k];
+}
+// Deja las filas con lote + una vacía al final mientras falte asignar y queden lotes sin usar
+function _pcNormalizar(k, s) {
+  var rows = _pc.filas[k] || [];
+  var llenas = rows.filter(function(r) { return r.lote; });
+  var vacia = rows.filter(function(r) { return !r.lote; })[0];
+  var suma = llenas.reduce(function(t, r) { return t + (parseInt(r.cant, 10) || 0); }, 0);
+  if ((suma < s.cant && llenas.length < s.lotes.length) || !llenas.length) llenas.push(vacia || { lote: '', cant: '' });
+  _pc.filas[k] = llenas;
+}
+function pcFila(a, b, i, campo, v) {
+  var l = _pc.parte && _pc.parte.lineas[a];
+  if (!l) return;
+  var s = l.sacado.filter(function(x) { return x.estado === 'SACADO'; })[b];
+  if (!s) return;
+  _pcLeerInputs();
+  var k = a + '-' + b, rows = _pc.filas[k], r = rows && rows[i];
+  if (!r) return;
+  if (campo === 'l') {
+    r.lote = v;
+    // Al elegir lote sin cantidad: propone lo que falta (sin pasar lo que hay en ese lote)
+    if (v && !(parseInt(r.cant, 10) > 0)) {
+      var otros = rows.reduce(function(t, g, j) { return t + (j !== i && g.lote ? (parseInt(g.cant, 10) || 0) : 0); }, 0);
+      var L = s.lotes.filter(function(x) { return x.lote === v; })[0];
+      r.cant = String(Math.max(0, Math.min(s.cant - otros, L ? L.disponible : 0)));
+    }
+  } else {
+    r.cant = v;
+  }
+  _pcNormalizar(k, s);
+  _pcRender();
 }
 function pcRechazar(a) {
   var l = _pc.parte && _pc.parte.lineas[a];
@@ -4055,13 +4096,24 @@ function _pcParteHtml(p) {
         if (!s.lotes.length) {
           html += '<div style="font-size:13px; color:#EF4444;">⛔ En esta ubicación no figura ningún lote con saldo. Marcá "Fecha no sirve" o pedí un ajuste.</div>';
         } else {
-          s.lotes.forEach(function(L, c) {
-            var id = 'pc-q-' + a + '-' + b + '-' + c;
-            var v = _pc.val[id] !== undefined ? _pc.val[id] : (s.lotes.length === 1 ? String(Math.min(s.cant, L.disponible)) : '');
-            html += '<div style="display:flex; align-items:center; gap:10px; margin-top:5px; font-size:13px;">' +
-              '<input type="number" min="0" class="pc-q" id="' + id + '" value="' + escHtml(v) + '" placeholder="0" style="width:80px; text-align:center; padding:6px;">' +
-              '<span>lote <b class="mono">' + escHtml(L.lote) + '</b> · vence <b>' + escHtml(L.fecha || '—') + '</b> · <span style="color:var(--c-text3);">disponible ' + L.disponible + '</span></span></div>';
+          // 16/11: una fila = desplegable de lote + cantidad; si no completa, aparece otra fila para el resto
+          var filas = _pcFilas(a, b, s), asig = 0;
+          filas.forEach(function(f, i) {
+            var usados = filas.filter(function(g, j) { return j !== i && g.lote; }).map(function(g) { return g.lote; });
+            var opts = '<option value="">— elegí el lote —</option>' + s.lotes.map(function(L) {
+              var usado = usados.indexOf(L.lote) >= 0;
+              return '<option value="' + escHtml(L.lote) + '"' + (f.lote === L.lote ? ' selected' : '') + (usado ? ' disabled' : '') + '>' +
+                escHtml(L.lote) + ' · vence ' + escHtml(L.fecha || '—') + ' · hay ' + L.disponible + '</option>';
+            }).join('');
+            if (f.lote) asig += parseInt(f.cant, 10) || 0;
+            html += '<div style="display:flex; align-items:center; gap:8px; margin-top:6px; font-size:13px; flex-wrap:wrap;">' +
+              '<select class="pc-sl" data-k="' + a + '-' + b + '" data-i="' + i + '" onchange="pcFila(' + a + ',' + b + ',' + i + ',\'l\',this.value)" style="flex:1; min-width:200px; padding:7px;">' + opts + '</select>' +
+              '<input type="number" min="0" class="pc-sq" data-k="' + a + '-' + b + '" data-i="' + i + '" value="' + escHtml(f.cant) + '" placeholder="cant." onchange="pcFila(' + a + ',' + b + ',' + i + ',\'c\',this.value)" style="width:80px; text-align:center; padding:7px;">' +
+              '<span style="color:var(--c-text3);">u.</span></div>';
           });
+          var fc = asig === s.cant ? '#10B981' : (asig > s.cant ? '#EF4444' : '#F59E0B');
+          html += '<div style="font-size:12px; font-weight:700; margin-top:6px; color:' + fc + ';">' +
+            (asig === s.cant ? '✓ ' + asig + ' de ' + s.cant + ' con lote' : (asig > s.cant ? '⛔ ' + asig + ' de ' + s.cant + ': sobran ' + (asig - s.cant) : 'Faltan ' + (s.cant - asig) + ' de ' + s.cant + ' por asignar')) + '</div>';
         }
         html += '</div>';
       });
@@ -4098,12 +4150,18 @@ async function pcConfirmar() {
     }
     var sacs = l.sacado.filter(function(s) { return s.estado === 'SACADO'; });
     for (var b = 0; b < sacs.length; b++) {
-      var s = sacs[b], partes = [], suma = 0;
-      for (var c = 0; c < s.lotes.length; c++) {
-        var q = parseInt(_pc.val['pc-q-' + a + '-' + b + '-' + c], 10) || 0;
+      var s = sacs[b], partes = [], suma = 0, vistos = {};
+      var filas = _pc.filas[a + '-' + b] || [];
+      for (var c = 0; c < filas.length; c++) {
+        var q = parseInt(filas[c].cant, 10) || 0;
         if (q < 0) { _pcMsg('⚠ ' + l.cod + ': cantidad inválida', true); return; }
-        if (q > s.lotes[c].disponible) { _pcMsg('⚠ ' + l.cod + ': del lote ' + s.lotes[c].lote + ' hay ' + s.lotes[c].disponible + ' disponibles', true); return; }
-        if (q > 0) { partes.push({ lote: s.lotes[c].lote, cant: q }); suma += q; }
+        if (!filas[c].lote) { if (q > 0) { _pcMsg('⚠ ' + l.cod + ' (' + s.ubicacion + '): elegí el lote de las ' + q + ' u.', true); return; } continue; }
+        var L = s.lotes.filter(function(x) { return x.lote === filas[c].lote; })[0];
+        if (!L) { _pcMsg('⚠ ' + l.cod + ': el lote ' + filas[c].lote + ' no está en ' + s.ubicacion, true); return; }
+        if (vistos[L.lote]) { _pcMsg('⚠ ' + l.cod + ': el lote ' + L.lote + ' está dos veces', true); return; }
+        vistos[L.lote] = 1;
+        if (q > L.disponible) { _pcMsg('⚠ ' + l.cod + ': del lote ' + L.lote + ' hay ' + L.disponible + ' disponibles', true); return; }
+        if (q > 0) { partes.push({ lote: L.lote, cant: q }); suma += q; }
       }
       if (suma !== s.cant) { _pcMsg('⚠ ' + l.cod + ' (' + s.ubicacion + '): los lotes suman ' + suma + ' y se sacaron ' + s.cant, true); return; }
       lotes.push({ idSacado: s.idSacado, partes: partes });
