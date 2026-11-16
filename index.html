@@ -3939,7 +3939,7 @@ function _prRenderColas() {
       lista.map(function(q, i) {
         var k = ids.indexOf(q.idPedido);
         var idE = escHtml(q.idPedido).replace(/'/g, '&#39;');
-        var flechas = q.empezada ? '<span style="font-size:11px; color:#3B82F6;">▶ en curso</span>' :
+        var flechas = q.empezada ? '<span style="font-size:11px; color:#3B82F6;">▶ en curso</span>' : ids.length < 2 ? '' :
           '<button class="btn btn-sm" style="padding:2px 8px;" ' + (k > 0 ? '' : 'disabled ') + 'onclick="prMover(\'' + opE + '\',\'' + idE + '\',-1)">↑</button>' +
           '<button class="btn btn-sm" style="padding:2px 8px;" ' + (k < ids.length - 1 ? '' : 'disabled ') + 'onclick="prMover(\'' + opE + '\',\'' + idE + '\',1)">↓</button>';
         return '<div style="display:flex; gap:8px; align-items:center; padding:4px 0; font-size:13px;">' +
@@ -4263,6 +4263,14 @@ async function mpCargar() {
   showToast(nuevos ? '🔔 ' + nuevos + ' novedad(es) en tus pedidos' : 'Sin novedades');
   mpRender();
 }
+// Pedido que el operario puede sacar ahora (lo manda el GAS; si es un GAS viejo, el primero con algo para sacar)
+function _mpActiva() {
+  var d = _mp.datos;
+  if (!d) return '';
+  if (d.activa !== undefined) return d.activa || '';
+  var q = (d.partes || []).filter(function(p) { return ['SACANDO', 'CORREGIR', 'ASIGNADA'].indexOf(p.estado) > -1; })[0];
+  return q ? q.idPedido : '';
+}
 function mpRender() {
   var el = document.getElementById('mp-lista');
   if (!el || !_mp.datos) return;
@@ -4271,15 +4279,17 @@ function mpRender() {
     el.innerHTML = '<div class="card" style="padding:32px; text-align:center; color:var(--c-text3);"><i class="ti ti-list-numbers" style="font-size:32px;"></i><div style="margin-top:8px;">No tenés pedidos asignados.</div></div>';
     return;
   }
-  var primero = partes[0];
+  // 16/11 (Pedro): solo traba la etapa de SACAR. Lo que espera control (etapa 2) o cajas (etapa 3) no frena el siguiente.
+  var idAct = _mpActiva();
+  var primero = partes.filter(function(p) { return p.idPedido === idAct; })[0];
   el.innerHTML = partes.map(function(p, i) {
     var est = _MP_EST[p.estado] || { txt: p.estado, color: '#8b949e' };
-    var activa = i === 0;
+    var activa = p.idPedido === idAct;
     var boton;
-    if (!activa) boton = '<div style="font-size:13px; color:var(--c-text3);">🔒 Primero terminá el N° ' + escHtml(primero.nro) + '</div>';
+    if (p.estado === 'PARA CONTROL') boton = '<div style="font-size:14px; font-weight:600; color:#A855F7;">⏳ Esperando que Matías controle las fechas — mientras, podés seguir con otro pedido</div>';
+    else if (p.estado === 'LISTO CAJAS') boton = '<div style="font-size:14px; font-weight:600; color:#10B981;">📦 Listo para armar cajas (todavía no disponible) — podés seguir con otro pedido</div>';
+    else if (!activa) boton = '<div style="font-size:13px; color:var(--c-text3);">🔒 Primero terminá de sacar el N° ' + escHtml(primero ? primero.nro : '') + '</div>';
     else if (p.estado === 'ASIGNADA') boton = '<button class="btn btn-primary" onclick="mpEmpezar(\'' + escHtml(p.idPedido) + '\')"><i class="ti ti-player-play"></i> Empezar</button>';
-    else if (p.estado === 'PARA CONTROL') boton = '<div style="font-size:14px; font-weight:600; color:#A855F7;">⏳ Esperando que Matías controle las fechas</div>';
-    else if (p.estado === 'LISTO CAJAS') boton = '<button class="btn btn-primary" onclick="switchPanel(\'ped-escaneo\')"><i class="ti ti-package"></i> Armar cajas</button>';
     else boton = '<button class="btn btn-primary" onclick="switchPanel(\'ped-escaneo\')"><i class="ti ti-barcode"></i> ' + (p.estado === 'CORREGIR' ? 'Corregir' : 'Seguir sacando') + '</button>';
     var filas = p.lineas.map(function(l) {
       var term = l.estado === 'EMBALADA' || l.estado === 'FALTANTE';
@@ -4390,15 +4400,13 @@ async function peAbrir(recargar) {
   var id = _pe.idForzado;
   _pe.idForzado = '';
   if (!id) {
-    var partes = (_mp.datos && _mp.datos.partes) || [];
-    var p0 = partes[0];
-    if (p0 && ['SACANDO', 'CORREGIR', 'ASIGNADA'].indexOf(p0.estado) > -1) id = p0.idPedido;
-    else if (!_mp.datos) { var l = _peLocal(); if (l && l.id) id = l.id; }
+    // 16/11: el pedido para sacar es la parte "activa" que decide el GAS (no siempre la primera de la lista)
+    if (_mp.datos) id = _mpActiva();
+    else { var l = _peLocal(); if (l && l.id) id = l.id; }
   }
   if (!id && !_mp.datos) {
     try { _mp.datos = await _prGet('accion=misPedidos&usuario=' + encodeURIComponent(CURRENT_USER.name || '')); } catch (e) {}
-    var q = ((_mp.datos && _mp.datos.partes) || [])[0];
-    if (q && ['SACANDO', 'CORREGIR', 'ASIGNADA'].indexOf(q.estado) > -1) id = q.idPedido;
+    id = _mpActiva();
   }
   if (!id) { _pe.datos = null; _peVer(false); _peMsg(''); document.getElementById('pe-sub').textContent = 'Sacar artículos y armar cajas'; return; }
   _peMsg('Cargando el pedido…');
