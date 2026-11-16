@@ -3916,32 +3916,66 @@ function _prRenderColas() {
   var card = document.getElementById('pr-colas-card');
   if (!card) return;
   card.style.display = ops.length ? '' : 'none';
+  // 16/11: las flechas solo cambian un BORRADOR en pantalla; se guarda una vez con "Confirmar orden"
+  var bor = _pr.borrador || (_pr.borrador = {});
   document.getElementById('pr-colas').innerHTML = ops.map(function(op) {
-    var movibles = colas[op].filter(function(q) { return !q.empezada; });
-    return '<div style="margin-bottom:12px;"><div style="font-weight:700; margin-bottom:6px;">' + escHtml(op) + '</div>' +
-      '<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">' +
-      colas[op].map(function(q, i) {
-        var k = movibles.indexOf(q);
+    var cola = colas[op];
+    var empezadas = cola.filter(function(q) { return q.empezada; });
+    var movibles = cola.filter(function(q) { return !q.empezada; });
+    var idsOrig = movibles.map(function(q) { return q.idPedido; });
+    var ids = bor[op] && bor[op].length === idsOrig.length && bor[op].every(function(x) { return idsOrig.indexOf(x) > -1; }) ? bor[op] : idsOrig;
+    var cambiado = ids.join('|') !== idsOrig.join('|');
+    var porId = {};
+    movibles.forEach(function(q) { porId[q.idPedido] = q; });
+    var lista = empezadas.concat(ids.map(function(x) { return porId[x]; }));
+    var opE = escHtml(op).replace(/'/g, '&#39;');
+    return '<div style="margin-bottom:12px; padding:10px 12px; border-radius:8px; border:1px solid ' + (cambiado ? '#F59E0B' : 'var(--c-border)') + ';">' +
+      '<div style="font-weight:700; margin-bottom:6px;">' + escHtml(op) + (cambiado ? ' <span style="font-size:11px; color:#F59E0B;">· orden sin confirmar</span>' : '') + '</div>' +
+      lista.map(function(q, i) {
+        var k = ids.indexOf(q.idPedido);
+        var idE = escHtml(q.idPedido).replace(/'/g, '&#39;');
         var flechas = q.empezada ? '<span style="font-size:11px; color:#3B82F6;">▶ en curso</span>' :
-          (k > 0 ? '<button class="btn btn-sm" style="padding:2px 6px;" onclick="prMover(\'' + escHtml(op) + '\',\'' + escHtml(q.idPedido) + '\',-1)">↑</button>' : '') +
-          (k < movibles.length - 1 ? '<button class="btn btn-sm" style="padding:2px 6px;" onclick="prMover(\'' + escHtml(op) + '\',\'' + escHtml(q.idPedido) + '\',1)">↓</button>' : '');
-        return (i ? '<span style="color:var(--c-text3);">→</span>' : '') +
-          '<span style="display:inline-flex; gap:4px; align-items:center; background:var(--c-surface2); border:1px solid var(--c-border); border-radius:8px; padding:4px 8px; font-size:13px;">' +
-          '<b>N° ' + escHtml(q.nro) + '</b> ' + escHtml(q.cliente) + ' ' + flechas + '</span>';
-      }).join('') + '</div></div>';
+          '<button class="btn btn-sm" style="padding:2px 8px;" ' + (k > 0 ? '' : 'disabled ') + 'onclick="prMover(\'' + opE + '\',\'' + idE + '\',-1)">↑</button>' +
+          '<button class="btn btn-sm" style="padding:2px 8px;" ' + (k < ids.length - 1 ? '' : 'disabled ') + 'onclick="prMover(\'' + opE + '\',\'' + idE + '\',1)">↓</button>';
+        return '<div style="display:flex; gap:8px; align-items:center; padding:4px 0; font-size:13px;">' +
+          '<span style="min-width:22px; font-weight:800; color:var(--c-text3);">' + (i + 1) + '.</span>' +
+          '<span style="flex:1;"><b>N° ' + escHtml(q.nro) + '</b> ' + escHtml(q.cliente) + '</span>' + flechas + '</div>';
+      }).join('') +
+      (cambiado ? '<div style="display:flex; gap:8px; justify-content:flex-end; margin-top:8px;">' +
+        '<button class="btn btn-sm" onclick="prOrdenCancelar(\'' + opE + '\')">Cancelar</button>' +
+        '<button class="btn btn-sm btn-primary" onclick="prOrdenConfirmar(\'' + opE + '\')"><i class="ti ti-check"></i> Confirmar orden</button></div>' : '') +
+      '</div>';
   }).join('');
 }
-async function prMover(op, idPedido, dir) {
-  if (_pr.busy) return;
+function _prIdsMovibles(op) {
   var cola = ((_pr.datos && _pr.datos.colas) || {})[op] || [];
-  var ids = cola.filter(function(q) { return !q.empezada; }).map(function(q) { return q.idPedido; });
+  var orig = cola.filter(function(q) { return !q.empezada; }).map(function(q) { return q.idPedido; });
+  var b = (_pr.borrador || {})[op];
+  return b && b.length === orig.length && b.every(function(x) { return orig.indexOf(x) > -1; }) ? b.slice() : orig;
+}
+function prMover(op, idPedido, dir) {
+  if (_pr.busy) return;
+  var ids = _prIdsMovibles(op);
   var i = ids.indexOf(idPedido), j = i + dir;
   if (i < 0 || j < 0 || j >= ids.length) return;
   ids[i] = ids[j]; ids[j] = idPedido;
+  (_pr.borrador || (_pr.borrador = {}))[op] = ids;
+  _prRenderColas();
+}
+function prOrdenCancelar(op) {
+  if (_pr.borrador) delete _pr.borrador[op];
+  _prRenderColas();
+}
+async function prOrdenConfirmar(op) {
+  if (_pr.busy) return;
+  var ids = _prIdsMovibles(op);
+  if (ids.length < 2) return;
   _pr.busy = true;
   try {
     await _prPost({ accion: 'reordenarPedidos', operario: op, idsPedido: ids });
+    if (_pr.borrador) delete _pr.borrador[op];
     showToast('✅ Orden de ' + op + ' actualizado');
+    _pr.busy = false;
     await prCargar();
   } catch (e) {
     _prMsg('No se cambió el orden: ' + e.message, true);
@@ -6129,10 +6163,10 @@ var incompletas = remito.filter(function(r){ return (r.unidadesControladas || 0)
   updateMetrics();
   var infoEl = document.getElementById('scan-remito-info');
   if (infoEl) infoEl.textContent = 'Sin remito activo';
-  localStorage.removeItem('stockcontrol_session');
+  localStorage.removeItem('BETA_stockcontrol_session');
 
   // Siempre escribir FINALIZADO en la celda del operario actual para liberar su slot
-  localStorage.removeItem('oc_en_escaneo');
+  localStorage.removeItem('BETA_oc_en_escaneo');
   var filaParaFinalizar = (CURRENT_USER && CURRENT_USER.filaAlerta) || 1;
    clearTimeout(window._finTimer);
   fetch(GAS_URL, {
@@ -7278,13 +7312,13 @@ async function _guardarDetalleHistorial(oc, escaneadoPor, tipo) {
       ];
     });
    var _pendHist = { filas: filas, ocId: oc.id };
-try { localStorage.setItem('sc_pending_detalle_' + oc.id, JSON.stringify(_pendHist)); } catch(e) {}
+try { localStorage.setItem('BETA_sc_pending_detalle_' + oc.id, JSON.stringify(_pendHist)); } catch(e) {}
 fetch(GAS_URL, {
   method: 'POST',
   mode: 'no-cors',
   body: JSON.stringify({ accion: 'guardarDetalleHistorial', filas: filas, ocId: oc.id })
 }).then(function() {
-  try { localStorage.removeItem('sc_pending_detalle_' + oc.id); } catch(e) {}
+  try { localStorage.removeItem('BETA_sc_pending_detalle_' + oc.id); } catch(e) {}
 }).catch(function() {});
   } catch(e) {}
 }
@@ -7469,7 +7503,7 @@ async function _checkAndRetryPendingFinRep() {
    async function _checkAndRetryPendingHistorial() {
   try {
     var keys = Object.keys(localStorage).filter(function(k) {
-      return k.indexOf('sc_pending_hist_') === 0 || k.indexOf('sc_pending_detalle_') === 0;
+      return k.indexOf('BETA_sc_pending_hist_') === 0 || k.indexOf('BETA_sc_pending_detalle_') === 0;
     });
     if (keys.length === 0) return;
     showToast('⚠ Hay ' + keys.length + ' historial(es) pendiente(s) — reintentando...');
@@ -7477,7 +7511,7 @@ async function _checkAndRetryPendingFinRep() {
       try {
         var data = JSON.parse(localStorage.getItem(key));
         if (!data) return;
-        var accion = key.indexOf('sc_pending_hist_') === 0 ? 'guardarHistorial' : 'guardarDetalleHistorial';
+        var accion = key.indexOf('BETA_sc_pending_hist_') === 0 ? 'guardarHistorial' : 'guardarDetalleHistorial';
         fetch(GAS_URL, {
           method: 'POST', mode: 'no-cors',
           body: JSON.stringify(Object.assign({ accion: accion }, data))
@@ -9452,7 +9486,7 @@ function enviarOCAlEscaneo(ocId) {
         var ordenesAct = loadOrdenes();
         var idx = ordenesAct.findIndex(function(o){ return o.id === ocId; });
         if (idx >= 0) { ordenesAct[idx].estadoManual = 'pendiente'; saveOrdenes(ordenesAct); }
-        localStorage.removeItem('oc_en_escaneo');
+        localStorage.removeItem('BETA_oc_en_escaneo');
         showToast('Bloqueo liberado — volvé a tocar "Enviar al escaneo"');
         renderOrdenes();
       }
@@ -9463,7 +9497,7 @@ function enviarOCAlEscaneo(ocId) {
       var ordenesAct = loadOrdenes();
       var idx = ordenesAct.findIndex(function(o){ return o.id === ocId; });
       if (idx >= 0) { ordenesAct[idx].estadoManual = 'pendiente'; saveOrdenes(ordenesAct); }
-      localStorage.removeItem('oc_en_escaneo');
+      localStorage.removeItem('BETA_oc_en_escaneo');
       showToast('Bloqueo liberado');
       renderOrdenes();
     }
@@ -9506,7 +9540,7 @@ async function _ejecutarEnvioEscaneo(ocId, filaAlerta, enviadoPor) {
     var idxAct = ordenesAct.findIndex(function(o){ return o.id === ocId; });
     if (idxAct >= 0) { ordenesAct[idxAct].estadoManual = 'controlando'; saveOrdenes(ordenesAct); }
     // try: con la memoria del navegador llena tiraba error y la alerta no salía
-    try { localStorage.setItem('oc_en_escaneo', oc.id); } catch(e) {}
+    try { localStorage.setItem('BETA_oc_en_escaneo', oc.id); } catch(e) {}
     // Enviar a la celda del operario elegido (ALERTAS!A{filaAlerta})
     fetch(GAS_URL, {
       method: 'POST', mode: 'no-cors',
@@ -10350,7 +10384,7 @@ function cambiarEstadoOC(ocId, nuevoEstado) {
 
 // AUTOSAVE — SESIÓN EN PROGRESO
 // ──────────────────────────────────────────────
-var SAVE_KEY = 'stockcontrol_session';
+var SAVE_KEY = 'BETA_stockcontrol_session';
 var autosaveTimer = null;
 
 function saveSession() {
@@ -10549,7 +10583,7 @@ function _liberarAlertaDeOC(ocId) {
     var val = (rows && rows[0] && rows[0][0]) ? String(rows[0][0]).trim() : '';
     if (val === 'EN_ESCANEO|' + ocId || val.split('|')[0] === ocId) {
       fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ accion: 'setAlerta', valor: 'VACIO', fila: fila }) });
-      localStorage.removeItem('oc_en_escaneo');
+      localStorage.removeItem('BETA_oc_en_escaneo');
     }
   }).catch(function(){});
 }
@@ -11141,7 +11175,7 @@ function _completarLogin(selected) {
   // Limpiar estado de la sesión anterior al cambiar de usuario
   sessionStorage.removeItem('_alv');
   sessionStorage.removeItem('_alv_fin');
-  localStorage.removeItem('oc_en_escaneo');
+  localStorage.removeItem('BETA_oc_en_escaneo');
   // Resetear variables globales
   remito = [];
   registro = [];
@@ -12670,7 +12704,7 @@ function _checkFinalizadoOC() {
         saveOrdenes(ordenes);
         renderOrdenes();
       }
-      localStorage.removeItem('oc_en_escaneo');
+      localStorage.removeItem('BETA_oc_en_escaneo');
 
       // IMPORTANTE: solo el ADMIN limpia la celda a VACIO — si el operario
       // la limpia también (en su propio polling cada 15s), puede borrarla
@@ -12726,24 +12760,24 @@ function _limpiarAlertaHuerfana(_rowsPreload) {
   _lectura.then(function(rows) {
     var val = (rows && rows[0] && rows[0][0]) ? String(rows[0][0]).trim() : 'VACIO';
     if (!val || val === 'VACIO') {
-      localStorage.removeItem('oc_en_escaneo');
+      localStorage.removeItem('BETA_oc_en_escaneo');
       return;
     }
     // Solo limpiar si está FINALIZADO, NO si está en escaneo
     if (val.startsWith('FINALIZADO|')) {
-      localStorage.removeItem('oc_en_escaneo');
+      localStorage.removeItem('BETA_oc_en_escaneo');
       // Limpiar la celda del operario
       fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ accion: 'setAlerta', valor: 'VACIO', fila: fila }) });
       return;
     }
     // Si dice EN_ESCANEO, mantener (no limpiar)
     if (val.startsWith('EN_ESCANEO|')) {
-      localStorage.setItem('oc_en_escaneo', '1');
+      localStorage.setItem('BETA_oc_en_escaneo', '1');
       return;
     }
     // Para cualquier otra O.C., MANTENERLA (no limpiarla automáticamente)
     // Solo se limpia cuando el operario hace click en la notificación o finaliza
-    localStorage.setItem('oc_en_escaneo', '1');
+    localStorage.setItem('BETA_oc_en_escaneo', '1');
   }).catch(function(){}).finally(function(){ _busy_limpiarAlertaHuerfana = false; });
 }
 
