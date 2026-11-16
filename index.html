@@ -3697,6 +3697,8 @@ async function pedGuardar() {
 // Lecturas: 1 al entrar o tocar Actualizar, 1 al abrir un pedido. Escrituras: 1 por Asignar / mover.
 var _pr = { datos: null, filtro: 'todos', abierto: '', detalle: null, busy: false, avisar: false, verAlertas: false };
 var _PR_ASIGNABLE = ['SIN ASIGNAR', 'ASIGNADA', 'DEVUELTA'];
+// 16/11: también las ya sacadas (PARA CONTROL / CONTROLADA) que quedaron sin operario al devolver el pedido
+function _prAsignable(l) { return _PR_ASIGNABLE.indexOf(l.estado) > -1 || (!l.operario && (l.estado === 'PARA CONTROL' || l.estado === 'CONTROLADA')); }
 async function _prGet(q) {
   var r = await (await fetch(GAS_URL + '?' + q, { cache: 'no-store' })).json();
   if (!r.ok) throw new Error(r.error || 'error');
@@ -3860,12 +3862,15 @@ function _prDetalleHtml(det) {
   var sel = '<select id="pr-op-sel" style="padding:7px 10px; border-radius:6px; background:var(--c-surface); color:var(--c-text); border:1px solid var(--c-border);">' +
     '<option value="">— Elegí operario —</option>' + ops.map(function(o) { return '<option value="' + escHtml(o) + '">' + escHtml(o) + '</option>'; }).join('') + '</select>';
   var filas = det.lineas.map(function(l) {
-    var asig = _PR_ASIGNABLE.indexOf(l.estado) > -1;
+    var asig = _prAsignable(l);
     return '<tr' + (l.estado === 'ANULADA' ? ' style="opacity:0.45;"' : '') + '>' +
       '<td>' + (asig ? '<input type="checkbox" class="pr-chk" value="' + escHtml(l.idLinea) + '" style="width:18px; height:18px;">' : '') + '</td>' +
       '<td>' + escHtml(l.hoja) + '</td><td class="mono">' + escHtml(l.cod) + '</td><td>' + escHtml(l.desc) + '</td>' +
       '<td style="text-align:center;">' + l.pedida + '</td>' +
-      '<td style="font-size:12px;">' + escHtml(l.estado) + (asig || l.estado === 'ANULADA' ? '' : ' 🔒') + '</td>' +
+      '<td style="font-size:12px;">' + escHtml(l.estado) + (asig || l.estado === 'ANULADA' ? '' : ' 🔒') +
+        // 16/11: avance para que Matías vea qué está completo y qué quedó a la mitad
+        ((l.estado === 'PARA CONTROL' || l.estado === 'CONTROLADA') ? '<div style="color:#10B981; font-weight:700;">✓ sacado ' + l.sacada + '/' + l.pedida + '</div>' :
+          (l.sacada > 0 ? '<div style="color:#F59E0B; font-weight:700;">a la mitad: ' + l.sacada + '/' + l.pedida + '</div>' : '')) + '</td>' +
       '<td style="font-size:12px;">' + escHtml(l.operario || '—') + '</td></tr>';
   }).join('');
   return '<div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">' + sel +
@@ -3889,7 +3894,7 @@ async function prAsignar(modo) {
   if (_pr.busy || !det || !det.lineas) return;
   var op = _val('pr-op-sel');
   if (modo !== 'quitar' && !op) { showToast('⚠ Elegí el operario'); return; }
-  var ls = det.lineas.filter(function(l) { return _PR_ASIGNABLE.indexOf(l.estado) > -1; });
+  var ls = det.lineas.filter(_prAsignable);
   if (modo !== 'todo') {
     var marc = Array.prototype.map.call(document.querySelectorAll('.pr-chk:checked'), function(c) { return c.value; });
     ls = ls.filter(function(l) { return marc.indexOf(l.idLinea) > -1; });
@@ -4013,7 +4018,7 @@ function _pcRender() {
   if (!c) return;
   var sub = document.getElementById('pc-sub');
   if (_pc.parte) {
-    if (sub) sub.textContent = 'Control de fechas — N° ' + _pc.parte.nro + ' de ' + _pc.parte.operario;
+    if (sub) sub.textContent = 'Control de fechas — N° ' + _pc.parte.nro + ' de ' + (_pc.parte.operario || 'pedido devuelto (sin operario)');
     c.innerHTML = _pcParteHtml(_pc.parte);
     return;
   }
@@ -4026,7 +4031,7 @@ function _pcRender() {
   c.innerHTML = l.map(function(x, n) {
     return '<div class="card" onclick="pcAbrir(' + n + ')" style="cursor:pointer; margin-bottom:10px; padding:14px 16px; border-left:4px solid #A855F7; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">' +
       '<div><span style="font-weight:800; font-size:16px; color:#C084FC;">N° ' + escHtml(x.nro) + '</span> <span style="font-weight:600;">' + escHtml(x.cliente) + '</span>' +
-      '<div style="font-size:12px; color:var(--c-text3); margin-top:3px;"><b>' + escHtml(x.operario) + '</b> · ' + x.lineas + ' artículo(s) para controlar</div></div>' +
+      '<div style="font-size:12px; color:var(--c-text3); margin-top:3px;"><b>' + escHtml(x.operario || 'Devuelto, sin operario') + '</b> · ' + x.lineas + ' artículo(s) para controlar</div></div>' +
       '<div style="text-align:right;"><span style="font-size:12px; font-weight:700; padding:3px 9px; border-radius:6px; background:#A855F722; color:#A855F7;">⏳ espera hace ' + x.minutos + ' min</span>' +
       '<div style="margin-top:6px;"><span class="btn btn-sm btn-primary">Controlar <i class="ti ti-chevron-right"></i></span></div></div></div>';
   }).join('');
@@ -4106,7 +4111,7 @@ function _pcParteHtml(p) {
   var met = function(lbl, v, cls) { return '<div class="metric-card' + (cls ? ' ' + cls : '') + '"><div class="metric-label">' + lbl + '</div><div class="metric-val">' + v + '</div></div>'; };
   var html = '<div class="card" style="margin-bottom:12px; padding:12px 16px; border-left:4px solid #C084FC; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">' +
       '<div><span style="font-weight:800; font-size:18px; color:#C084FC;">N° ' + escHtml(p.nro) + '</span> <span style="font-weight:600;">' + escHtml(p.cliente) + '</span>' +
-      '<div style="font-size:12px; color:var(--c-text3); margin-top:3px;">Sacado por <b>' + escHtml(p.operario) + '</b></div></div>' +
+      '<div style="font-size:12px; color:var(--c-text3); margin-top:3px;">Sacado por <b>' + escHtml(p.operario || 'operario que devolvió el pedido') + '</b></div></div>' +
       '<button class="btn btn-sm" onclick="pcVolver()"><i class="ti ti-arrow-left"></i> Volver</button></div>' +
     '<div class="metrics-grid">' + met('Artículos', p.lineas.length) + met('Para controlar', aCtrl.length) + met('Unidades sacadas', unid, 'metric-ok') + met('Faltantes', falt, 'metric-warn') + '</div>' +
     '<div class="card" style="padding:0; overflow:hidden; margin-top:12px;"><div style="padding:12px 16px; font-weight:700; border-bottom:1px solid var(--c-border);">Estado de líneas</div>';
@@ -4207,7 +4212,7 @@ async function pcConfirmar() {
   _pcMsg('Guardando el control…');
   try {
     var r = await _prPost({ accion: 'controlarParte', idPedido: p.idPedido, operario: p.operario, usuario: (CURRENT_USER && CURRENT_USER.name) || '', lotes: lotes, rechazos: rechazos });
-    showToast(r.ya ? 'Ese pedido ya estaba controlado' : '✅ N° ' + p.nro + ': ' + r.controladas + ' aprobado(s)' + (r.rechazadas ? ', ' + r.rechazadas + ' devuelto(s) a ' + p.operario + ' para corregir' : ''));
+    showToast(r.ya ? 'Ese pedido ya estaba controlado' : '✅ N° ' + p.nro + ': ' + r.controladas + ' aprobado(s)' + (r.rechazadas ? ', ' + r.rechazadas + (p.operario ? ' devuelto(s) a ' + p.operario + ' para corregir' : ' quedan para reasignar') : ''));
     _pc.busy = false;
     await pcCargar();
   } catch (e) {
@@ -4335,10 +4340,10 @@ async function mpDevolver(id) {
       var tomas = _peTomasLista(loc.tomas);
       if (tomas.length) await _prPost({ accion: 'registrarSacado', soloGuardar: true, idPedido: id, tomas: tomas, faltantes: [], usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
     }
-    await _prPost({ accion: 'devolverParte', idPedido: id, motivo: mot, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
+    var rd = await _prPost({ accion: 'devolverParte', idPedido: id, motivo: mot, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
     _mp.devAbierto = '';
     if (loc && loc.id === id) _peBorrarLocal();
-    showToast('✅ Pedido devuelto a Matías');
+    showToast('✅ Pedido devuelto a Matías' + (rd && rd.completas ? ' (' + rd.completas + ' artículo(s) ya sacado(s) quedan como completos)' : ''));
     await mpCargar();
   } catch (e) {
     _mpMsg('No se pudo devolver: ' + e.message, true);
