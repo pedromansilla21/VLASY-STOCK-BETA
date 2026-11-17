@@ -4349,7 +4349,9 @@ async function mpDevolver(id) {
     var loc = _peLocal();
     if (loc && loc.id === id) {
       var tomas = _peTomasLista(loc.tomas);
-      if (tomas.length) await _prPost({ accion: 'registrarSacado', soloGuardar: true, idPedido: id, tomas: tomas, faltantes: [], usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
+      // 17/11: deMas para que lo sacado de más también se guarde (si no, el GAS lo rechaza por pasar lo disponible)
+      var _dm = Object.keys(loc.deMas || {}).filter(function(c) { return loc.deMas[c]; });
+      if (tomas.length) await _prPost({ accion: 'registrarSacado', soloGuardar: true, idPedido: id, tomas: tomas, faltantes: [], deMas: _dm, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
     }
     var rd = await _prPost({ accion: 'devolverParte', idPedido: id, motivo: mot, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
     _mp.devAbierto = '';
@@ -4438,6 +4440,12 @@ async function peAbrir(recargar) {
   Object.keys(loc.tomas).forEach(function(k) { if (!vivas[k]) delete loc.tomas[k]; });
   Object.keys(loc.faltas).forEach(function(k) { if (!vivas[k]) delete loc.faltas[k]; });
   if (!loc.salt) loc.salt = {};
+  if (!loc.cerr) loc.cerr = {};   // 17/11: ubicaciones cerradas con "Ir a la reserva" (por línea)
+  if (!loc.deMas) loc.deMas = {}; // 17/11: ubicaciones donde tocó "Sacar de más" (por código de ubicación)
+  // Lo ya mandado antes (devuelto / corregir) que pasa lo disponible: viene de un "Sacar de más"
+  var _porU = {};
+  Object.keys(loc.tomas).forEach(function(idl) { Object.keys(loc.tomas[idl]).forEach(function(c) { _porU[c] = (_porU[c] || 0) + loc.tomas[idl][c]; }); });
+  d.ubicaciones.forEach(function(u) { if ((_porU[u.codigo] || 0) > u.disponible) loc.deMas[u.codigo] = true; });
   _pe.loc = loc;
   if (loc.paso && (!vivas[loc.paso.idLinea] || !loc.paso.ubiOk)) loc.paso = null; // si apretó F5 en el medio, sigue en la misma ubicación
   _peGuardar();
@@ -4466,9 +4474,23 @@ function _peUbisDe(cod) {
 function _peHay(u) { return u.disponible - _peUsadoUbi(u.codigo); }
 function _peFalta(l) { return l.pedida - _peSumaLinea(l.idLinea); }
 function _pePendiente(l) { return _peFalta(l) > 0 && !_pe.loc.faltas[l.idLinea]; }
+// 17/11: el PICKING siempre es la primera (aunque el sistema diga 0) hasta que el operario elija
+// "Ir a la reserva" o "No hay acá"; las reservas, solo si tienen disponible (o si ya tocó "Sacar de más" ahí).
 function _peUbisLibres(l) {
+  var salt = _pe.loc.salt[l.idLinea] || [], cerr = (_pe.loc.cerr || {})[l.idLinea] || [];
+  return _peUbisDe(l.cod).filter(function(x) {
+    if (salt.indexOf(x.codigo) > -1 || cerr.indexOf(x.codigo) > -1) return false;
+    return x.tipo === 'PICKING' || _peHay(x) > 0 || (_pe.loc.deMas || {})[x.codigo];
+  });
+}
+// Sin ninguna libre: puede escanear cualquier ubicación del artículo (sin "No hay acá") para "Sacar de más"
+function _peUbisDeMasPosibles(l) {
   var salt = _pe.loc.salt[l.idLinea] || [];
-  return _peUbisDe(l.cod).filter(function(x) { return salt.indexOf(x.codigo) === -1 && _peHay(x) > 0; });
+  return _peUbisDe(l.cod).filter(function(x) { return salt.indexOf(x.codigo) === -1; });
+}
+// ¿Queda otra ubicación (distinta de esta) con disponible en el sistema?
+function _peHayOtra(l, codigo) {
+  return _peUbisLibres(l).some(function(x) { return x.codigo !== codigo && _peHay(x) > 0; });
 }
 // 17/11 (Pedro): dentro de cada artículo, prioridad SIEMPRE al picking. Solo se puede sacar de la PRIMERA
 // ubicación libre (picking primero); a la reserva se pasa cuando el picking no tiene más o se marcó "No hay acá".
@@ -4478,11 +4500,14 @@ function _peLinea(idl) { return _pe.datos.lineas.find(function(l) { return l.idL
 // Abre la tarjeta del artículo que corresponde a esa ubicación (si le falta algo y la ubicación tiene)
 function _peAbrirUbi(u) {
   var l = _pe.datos.lineas.find(function(x) {
-    var sig = _pePendiente(x) ? _peSiguienteUbi(x) : null;
-    return x.cod === u.cod && sig && sig.codigo === u.codigo;
+    if (x.cod !== u.cod || !_pePendiente(x)) return false;
+    var sig = _peSiguienteUbi(x);
+    if (sig) return sig.codigo === u.codigo;
+    return _peUbisDeMasPosibles(x).some(function(y) { return y.codigo === u.codigo; });
   });
   if (!l) return false;
-  _pe.loc.paso = { idLinea: l.idLinea, codigo: u.codigo, objetivo: Math.min(_peFalta(l), _peHay(u)), hechas: 0, ubiOk: true };
+  var _obj = _pe.loc.deMas[u.codigo] ? _peFalta(l) : Math.min(_peFalta(l), Math.max(0, _peHay(u)));
+  _pe.loc.paso = { idLinea: l.idLinea, codigo: u.codigo, objetivo: _obj, hechas: 0, ubiOk: true };
   _pe.loc.ultSalt = null;
   _pe.faltaAbierta = '';
   _peGuardar();
@@ -4552,6 +4577,39 @@ function peContinuar() {
   _peAviso('Escaneá la próxima ubicación');
   peRender();
 }
+// 17/11: se terminó lo de esta ubicación (coincide con el sistema) → se cierra y sigue la reserva (o falta)
+function peIrReserva(falta) {
+  var p = _pe.loc && _pe.loc.paso;
+  if (!p) return;
+  var c = _pe.loc.cerr[p.idLinea] || (_pe.loc.cerr[p.idLinea] = []);
+  if (c.indexOf(p.codigo) === -1) c.push(p.codigo);
+  var idl = p.idLinea;
+  _peAvanzar();
+  if (falta) _pe.faltaAbierta = idl;
+  _peAviso(falta ? 'Marcá la falta abajo' : 'Escaneá la reserva marcada con ▶');
+  peRender();
+}
+// 17/11: hay más de lo que dice el sistema → sigue sacando acá hasta completar el pedido
+function peSacarDeMas() {
+  var p = _pe.loc && _pe.loc.paso;
+  if (!p) return;
+  var l = _peLinea(p.idLinea), u = _peUbi(p.codigo);
+  if (!confirm('¿Seguro que en ' + (u ? u.ubic : p.codigo) + ' hay más de lo que dice el sistema?\n\nLa ubicación va a quedar marcada con DIFERENCIA para que la revisen.')) return;
+  _pe.loc.deMas[p.codigo] = true;
+  p.objetivo = p.hechas + _peFalta(l);
+  _peGuardar();
+  _peAviso('Seguí escaneando las unidades de más', 'ok');
+  peRender();
+}
+// Códigos de ubicación para el GAS: dónde se sacó de más y dónde marcó "No hay acá" con disponible en el sistema
+function _peExtras() {
+  var deMas = Object.keys(_pe.loc.deMas || {}).filter(function(c) { return _pe.loc.deMas[c]; });
+  var noHay = [];
+  Object.keys(_pe.loc.salt || {}).forEach(function(idl) {
+    (_pe.loc.salt[idl] || []).forEach(function(c) { var u = _peUbi(c); if (u && u.disponible > 0 && noHay.indexOf(c) === -1) noHay.push(c); });
+  });
+  return { deMas: deMas, noHay: noHay };
+}
 // "No hay acá": lo escaneado queda; se puede deshacer si lo tocó sin querer
 function peNoHayAca() {
   var p = _pe.loc && _pe.loc.paso;
@@ -4617,8 +4675,19 @@ function peRender() {
         '<div style="font-size:' + (sobra > 0 ? '15px; font-weight:800; color:#EF4444' : '12px; color:' + (sobra === 0 ? '#10B981' : 'var(--c-text3)')) + '; margin-top:6px;">' +
         (sobra > 0 ? '⚠ Te pasaste ' + sobra + ': dejá ' + sobra + ' en la ubicación' : sobra === 0 ? '☑ Todas las unidades de esta ubicación' : (p.objetivo - p.hechas) + ' restantes') + '</div>', sobra > 0 ? '#EF4444' : '');
     }
+    var restaPed = _peFalta(l);
     if (sobra > 0) acciones += '<button class="btn" onclick="peQuitarSobra()" style="width:100%; margin-top:6px; padding:12px; font-size:15px; font-weight:700; background:#EF4444; color:#fff; border:none;">Ya dejé las ' + sobra + ' de más</button>';
-    if (sobra === 0) acciones += '<button class="btn" onclick="peContinuar()" style="width:100%; margin-top:6px; padding:12px; font-size:15px; font-weight:700; background:#4CAF7D; color:#fff; border:none;">Confirmar y continuar →</button>';
+    // 17/11: llegó a lo que dice el sistema y todavía falta → elegir: ir a la reserva / sacar de más / falta
+    if (sobra === 0 && restaPed > 0) {
+      var otra = _peHayOtra(l, p.codigo);
+      acciones += caja('<div style="font-size:15px; font-weight:800; color:#F59E0B;">' + (p.objetivo ? 'Llegaste a lo que figura en el sistema (' + p.objetivo + ')' : 'El sistema dice que acá no hay más') + '</div>' +
+        '<div style="font-size:13px; color:var(--c-text2); margin-top:4px;">Faltan <b>' + restaPed + '</b> del pedido. ¿Quedan unidades en ' + escHtml(u ? u.ubic : '') + '?</div>' +
+        (otra ? '<button class="btn" onclick="peIrReserva()" style="width:100%; margin-top:10px; padding:12px; font-size:15px; font-weight:700; background:#3B82F6; color:#fff; border:none;">No, se terminó → ir a la reserva</button>'
+              : '<button class="btn" onclick="peIrReserva(true)" style="width:100%; margin-top:10px; padding:12px; font-size:15px; font-weight:700; background:#F59E0B; color:#fff; border:none;">No, se terminó → marcar falta</button>') +
+        '<button class="btn" onclick="peSacarDeMas()" style="width:100%; margin-top:8px; padding:12px; font-size:15px; font-weight:700; background:transparent; color:#EF4444; border:2px solid #EF4444;">Sí, hay más → SACAR DE MÁS</button>' +
+        '<div style="font-size:11px; color:var(--c-text3); margin-top:6px;">"Sacar de más" deja la ubicación marcada con diferencia para que la oficina la revise.</div>', '#F59E0B');
+    }
+    if (sobra === 0 && restaPed <= 0) acciones += '<button class="btn" onclick="peContinuar()" style="width:100%; margin-top:6px; padding:12px; font-size:15px; font-weight:700; background:#4CAF7D; color:#fff; border:none;">Confirmar y continuar →</button>';
     if (!_pe.plegada) {
       var chicos = '';
       if (sobra < 0) chicos += '<button class="btn btn-sm" onclick="peNoHayAca()">No hay acá → otra ubicación</button>';
@@ -4642,7 +4711,7 @@ function peRender() {
     var tot = _peSumaLinea(l.idLinea), completa = tot >= l.pedida, falta = loc.faltas[l.idLinea], actual = p && p.idLinea === l.idLinea;
     var libres = (!completa && !falta) ? _peUbisLibres(l) : [];
     var color = tot > l.pedida ? '#EF4444' : completa ? '#10B981' : falta ? '#F59E0B' : actual ? '#C084FC' : 'var(--c-border)';
-    var est = tot > l.pedida ? '⚠ Te pasaste ' + (tot - l.pedida) : completa ? '✅ Completo' : falta ? '⚠ Falta ' + (l.pedida - tot) + ': ' + escHtml(falta) : actual ? '▶ Sacando' : libres.length ? 'Pendiente' : '⛔ No queda de dónde sacar: marcá Falta';
+    var est = tot > l.pedida ? '⚠ Te pasaste ' + (tot - l.pedida) : completa ? '✅ Completo' : falta ? '⚠ Falta ' + (l.pedida - tot) + ': ' + escHtml(falta) : actual ? '▶ Sacando' : libres.length ? 'Pendiente' : '⛔ El sistema no tiene más: si hay, escaneá la ubicación y "Sacar de más"; si no, marcá Falta';
     var det = Object.keys(loc.tomas[l.idLinea] || {}).map(function(c) { var u = _peUbi(c); return (u ? escHtml(u.ubic) : escHtml(c)) + ': ' + loc.tomas[l.idLinea][c]; }).join(' · ');
     var sigL = libres[0] || null;
     var ubis = (!completa && !falta && !actual) ? _peUbisDe(l.cod).map(function(u) {
@@ -4677,6 +4746,7 @@ function peBorrarLinea(idl) {
   delete _pe.loc.tomas[idl];
   delete _pe.loc.faltas[idl];
   delete _pe.loc.salt[idl];
+  if (_pe.loc.cerr) delete _pe.loc.cerr[idl];
   if (!_pe.loc.paso || _pe.loc.paso.idLinea === idl) _peAvanzar();
   else _peGuardar();
   _peAviso('');
@@ -4690,7 +4760,8 @@ async function peTerminar() {
   peRender();
   _peMsg('Mandando lo sacado…');
   try {
-    var r = await _prPost({ accion: 'registrarSacado', idPedido: d.idPedido, tomas: _peTomasLista(loc.tomas), faltantes: faltantes, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
+    var ex = _peExtras();
+    var r = await _prPost({ accion: 'registrarSacado', idPedido: d.idPedido, tomas: _peTomasLista(loc.tomas), faltantes: faltantes, deMas: ex.deMas, noHay: ex.noHay, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
     _peBorrarLocal();
     _pe.datos = null; _pe.loc = null;
     _peVer(false);
