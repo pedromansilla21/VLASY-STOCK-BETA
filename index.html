@@ -4470,12 +4470,16 @@ function _peUbisLibres(l) {
   var salt = _pe.loc.salt[l.idLinea] || [];
   return _peUbisDe(l.cod).filter(function(x) { return salt.indexOf(x.codigo) === -1 && _peHay(x) > 0; });
 }
+// 17/11 (Pedro): dentro de cada artículo, prioridad SIEMPRE al picking. Solo se puede sacar de la PRIMERA
+// ubicación libre (picking primero); a la reserva se pasa cuando el picking no tiene más o se marcó "No hay acá".
+function _peSiguienteUbi(l) { return _peUbisLibres(l)[0] || null; }
 function _peAvanzar() { _pe.loc.paso = null; _pe.loc.ultSalt = null; _pe.faltaAbierta = ''; _peGuardar(); }
 function _peLinea(idl) { return _pe.datos.lineas.find(function(l) { return l.idLinea === idl; }); }
 // Abre la tarjeta del artículo que corresponde a esa ubicación (si le falta algo y la ubicación tiene)
 function _peAbrirUbi(u) {
   var l = _pe.datos.lineas.find(function(x) {
-    return x.cod === u.cod && _pePendiente(x) && _peUbisLibres(x).some(function(y) { return y.codigo === u.codigo; });
+    var sig = _pePendiente(x) ? _peSiguienteUbi(x) : null;
+    return x.cod === u.cod && sig && sig.codigo === u.codigo;
   });
   if (!l) return false;
   _pe.loc.paso = { idLinea: l.idLinea, codigo: u.codigo, objetivo: Math.min(_peFalta(l), _peHay(u)), hechas: 0, ubiOk: true };
@@ -4496,8 +4500,10 @@ function peScan(raw) {
     if (!_peAbrirUbi(u)) {
       var l0 = _pe.datos.lineas.find(function(x) { return x.cod === u.cod; });
       var salt0 = l0 ? (loc.salt[l0.idLinea] || []) : [];
+      var sig0 = l0 && _pePendiente(l0) ? _peSiguienteUbi(l0) : null;
       _peAviso(l0 && !_pePendiente(l0) ? '⛔ ' + escHtml(u.cod) + ' ya está completo' :
         salt0.indexOf(u.codigo) > -1 ? '⛔ En ' + escHtml(u.ubic) + ' marcaste "No hay acá"' :
+        sig0 ? '⛔ Primero sacá de ' + escHtml(sig0.ubic) + ' (' + sig0.tipo + ')' :
         '⛔ No queda nada para sacar en ' + escHtml(u.ubic), 'err');
       return;
     }
@@ -4586,7 +4592,7 @@ function peRender() {
       tarjeta = caja('<div style="font-size:16px; font-weight:800; color:#10B981;">✅ Sacaste todo el pedido</div><div style="font-size:13px; color:var(--c-text3); margin-top:4px;">Revisá el resumen y tocá "Terminé de sacar".</div>', '#10B981');
     } else {
       tarjeta = caja('<div style="font-size:16px; font-weight:800;">📦 Escaneá cualquier ubicación del pedido</div>' +
-        '<div style="font-size:13px; color:var(--c-text3); margin-top:4px;">Abajo tenés dónde está cada artículo. Andá en el orden que quieras.</div>', '#C084FC');
+        '<div style="font-size:13px; color:var(--c-text3); margin-top:4px;">Abajo tenés dónde ir para cada artículo (marcado en color). Los artículos, en el orden que quieras; de cada uno, primero el picking.</div>', '#C084FC');
       if (loc.ultSalt) {
         var uu = _peUbi(loc.ultSalt.codigo);
         acciones += '<button class="btn btn-sm" onclick="peDeshacerNoHay()" style="margin-top:8px;">↩ Deshacer "No hay acá" en ' + escHtml(uu ? uu.ubic : loc.ultSalt.codigo) + '</button>';
@@ -4638,9 +4644,12 @@ function peRender() {
     var color = tot > l.pedida ? '#EF4444' : completa ? '#10B981' : falta ? '#F59E0B' : actual ? '#C084FC' : 'var(--c-border)';
     var est = tot > l.pedida ? '⚠ Te pasaste ' + (tot - l.pedida) : completa ? '✅ Completo' : falta ? '⚠ Falta ' + (l.pedida - tot) + ': ' + escHtml(falta) : actual ? '▶ Sacando' : libres.length ? 'Pendiente' : '⛔ No queda de dónde sacar: marcá Falta';
     var det = Object.keys(loc.tomas[l.idLinea] || {}).map(function(c) { var u = _peUbi(c); return (u ? escHtml(u.ubic) : escHtml(c)) + ': ' + loc.tomas[l.idLinea][c]; }).join(' · ');
+    var sigL = libres[0] || null;
     var ubis = (!completa && !falta && !actual) ? _peUbisDe(l.cod).map(function(u) {
-      var ok = libres.some(function(x) { return x.codigo === u.codigo; }), colU = u.tipo === 'PICKING' ? '#10B981' : '#3B82F6';
-      return '<span style="display:inline-block; margin:4px 6px 0 0; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:700; border:1px solid ' + (ok ? colU : 'var(--c-border)') + '; color:' + (ok ? colU : 'var(--c-text3)') + ';' + (ok ? '' : ' text-decoration:line-through;') + '">📍 ' + escHtml(u.ubic) + ' · ' + u.tipo + '</span>';
+      // 17/11: en color solo la que toca ahora (picking primero); las libres que siguen, grises; las sin nada, tachadas
+      var ok = sigL && sigL.codigo === u.codigo, despues = !ok && libres.some(function(x) { return x.codigo === u.codigo; });
+      var colU = u.tipo === 'PICKING' ? '#10B981' : '#3B82F6';
+      return '<span style="display:inline-block; margin:4px 6px 0 0; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:700; border:1px solid ' + (ok ? colU : 'var(--c-border)') + '; color:' + (ok ? colU : 'var(--c-text3)') + ';' + (ok || despues ? '' : ' text-decoration:line-through;') + '">' + (ok ? '▶ ' : '📍 ') + escHtml(u.ubic) + ' · ' + u.tipo + (despues ? ' (después)' : '') + '</span>';
     }).join('') : '';
     var btnFalta = (!p && !completa && !falta && _pe.faltaAbierta !== l.idLinea) ? '<button class="btn btn-sm" title="No hay: saltear con motivo" onclick="_pe.faltaAbierta=\'' + escHtml(l.idLinea) + '\'; peRender();">⚠ Falta</button>' : '';
     return '<div class="card" style="margin-bottom:6px; padding:9px 12px; border-left:4px solid ' + color + '; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">' +
