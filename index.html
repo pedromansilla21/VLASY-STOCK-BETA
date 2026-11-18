@@ -4057,6 +4057,52 @@ function _pcLeerInputs() {
   document.querySelectorAll('.pc-sl').forEach(function(el) { var r = (_pc.filas[el.dataset.k] || [])[el.dataset.i]; if (r) r.lote = el.value; });
   document.querySelectorAll('.pc-sq').forEach(function(el) { var r = (_pc.filas[el.dataset.k] || [])[el.dataset.i]; if (r) r.cant = el.value; });
   document.querySelectorAll('.pc-mot').forEach(function(el) { _pc.mot[el.dataset.l] = el.value; });
+  document.querySelectorAll('.pc-ml').forEach(function(el) { var r = (_pc.filas[el.dataset.k] || [])[el.dataset.i]; if (r) r.lote = el.value.trim().toUpperCase(); });
+  document.querySelectorAll('.pc-mf').forEach(function(el) { var r = (_pc.filas[el.dataset.k] || [])[el.dataset.i]; if (r) r.fecha = el.value.trim(); });
+  document.querySelectorAll('.pc-mq').forEach(function(el) { var r = (_pc.filas[el.dataset.k] || [])[el.dataset.i]; if (r) r.cant = el.value; });
+}
+// ── 18/11: filas DE MÁS (sacadas por encima del sistema): lote a mano + fecha obligatoria, sin tope ──
+// Fecha escrita → "MM/AAAA" ('' si no sirve). Acepta 4/26, 04/2026, 2026-04 (igual que el GAS).
+function _pcFechaNorm(v) {
+  var s = String(v || '').trim(), m = s.match(/^(\d{1,2})\s*[\/\-.]\s*(\d{2}|\d{4})$/), y, mm;
+  if (m) { mm = parseInt(m[1], 10); y = m[2].length === 2 ? 2000 + parseInt(m[2], 10) : parseInt(m[2], 10); }
+  else { m = s.match(/^(\d{4})-(\d{1,2})$/); if (!m) return ''; y = parseInt(m[1], 10); mm = parseInt(m[2], 10); }
+  if (!(mm >= 1 && mm <= 12) || y < 2000 || y > 2099) return '';
+  return ('0' + mm).slice(-2) + '/' + y;
+}
+function _pcFilasDM(a, b, s) {
+  var k = a + '-' + b;
+  if (!_pc.filas[k]) {
+    var L = s.lotes.length === 1 ? s.lotes[0] : null;
+    _pc.filas[k] = [{ lote: L ? L.lote : '', fecha: L ? (L.fecha || '') : '', cant: String(s.cant) }];
+  }
+  return _pc.filas[k];
+}
+function _pcNormalizarDM(k, s) {
+  var rows = (_pc.filas[k] || []).filter(function(r) { return r.lote || r.fecha || (parseInt(r.cant, 10) || 0) > 0; });
+  var suma = rows.reduce(function(t, r) { return t + (parseInt(r.cant, 10) || 0); }, 0);
+  if (suma < s.cant || !rows.length) rows.push({ lote: '', fecha: '', cant: String(Math.max(0, s.cant - suma)) });
+  _pc.filas[k] = rows;
+}
+function pcFilaDM(a, b, i, campo, v) {
+  var l = _pc.parte && _pc.parte.lineas[a];
+  if (!l) return;
+  var s = l.sacado.filter(function(x) { return x.estado === 'SACADO'; })[b];
+  if (!s) return;
+  _pcLeerInputs();
+  var k = a + '-' + b, r = (_pc.filas[k] || [])[i];
+  if (!r) return;
+  if (campo === 'l') {
+    r.lote = String(v || '').trim().toUpperCase();
+    var L = s.lotes.filter(function(x) { return String(x.lote).toUpperCase() === r.lote; })[0];
+    if (L && !r.fecha) r.fecha = L.fecha || '';
+  } else if (campo === 'f') {
+    r.fecha = _pcFechaNorm(v) || String(v || '').trim();
+  } else {
+    r.cant = v;
+  }
+  _pcNormalizarDM(k, s);
+  _pcRender();
 }
 // Filas lote+cantidad de un sacado (a = línea, b = sacado). Arranca con 1 fila; con un solo lote, ya elegido.
 function _pcFilas(a, b, s) {
@@ -4132,8 +4178,25 @@ function _pcParteHtml(p) {
         var tc = s.tipo === 'PICKING' ? '#10B981' : '#3B82F6';
         html += '<div style="margin-top:10px; padding:10px 12px; border-radius:8px; background:var(--c-surface2);">' +
           '<div style="font-size:13px; margin-bottom:6px;"><span style="font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; background:' + tc + '22; color:' + tc + ';">' + escHtml(s.tipo) + '</span> ' +
-          '<span class="mono">' + escHtml(s.ubicacion) + '</span> — sacó <b>' + s.cant + '</b>. ¿De qué lote?</div>';
-        if (!s.lotes.length) {
+          '<span class="mono">' + escHtml(s.ubicacion) + '</span> — sacó <b>' + s.cant + '</b>. ¿De qué lote?' +
+          (s.deMas ? ' <span style="font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; background:#EF444422; color:#EF4444;">⚠ ' + s.cant + ' DE MÁS (el sistema no las tenía)</span>' : '') + '</div>';
+        if (s.deMas) {
+          // 18/11: de más → lote y fecha reales que tiene en la mano; los lotes de la ubicación son solo sugerencia
+          var filasM = _pcFilasDM(a, b, s), asigM = 0, dl = 'pc-dl-' + a + '-' + b;
+          html += '<datalist id="' + dl + '">' + s.lotes.map(function(L) { return '<option value="' + escHtml(L.lote) + '">vence ' + escHtml(L.fecha || '—') + '</option>'; }).join('') + '</datalist>';
+          filasM.forEach(function(f, i) {
+            asigM += parseInt(f.cant, 10) || 0;
+            var at = ' data-k="' + a + '-' + b + '" data-i="' + i + '"';
+            html += '<div style="display:flex; align-items:center; gap:8px; margin-top:6px; font-size:13px; flex-wrap:wrap;">' +
+              '<input type="text" class="pc-ml"' + at + ' list="' + dl + '" value="' + escHtml(f.lote) + '" placeholder="Lote (si no tiene, dejar vacío)" onchange="pcFilaDM(' + a + ',' + b + ',' + i + ',\'l\',this.value)" style="flex:1; min-width:150px; padding:7px;">' +
+              '<input type="text" class="pc-mf"' + at + ' value="' + escHtml(f.fecha) + '" placeholder="Vence MM/AAAA *" inputmode="numeric" onchange="pcFilaDM(' + a + ',' + b + ',' + i + ',\'f\',this.value)" style="width:130px; text-align:center; padding:7px;' + (f.cant && !_pcFechaNorm(f.fecha) ? ' border-color:#EF4444;' : '') + '">' +
+              '<input type="number" min="0" class="pc-mq"' + at + ' value="' + escHtml(f.cant) + '" placeholder="cant." onchange="pcFilaDM(' + a + ',' + b + ',' + i + ',\'c\',this.value)" style="width:80px; text-align:center; padding:7px;">' +
+              '<span style="color:var(--c-text3);">u.</span></div>';
+          });
+          var fcM = asigM === s.cant ? '#10B981' : (asigM > s.cant ? '#EF4444' : '#F59E0B');
+          html += '<div style="font-size:12px; font-weight:700; margin-top:6px; color:' + fcM + ';">' +
+            (asigM === s.cant ? '✓ ' + asigM + ' de ' + s.cant + ' con fecha' : (asigM > s.cant ? '⛔ ' + asigM + ' de ' + s.cant + ': sobran ' + (asigM - s.cant) : 'Faltan ' + (s.cant - asigM) + ' de ' + s.cant + ' por asignar')) + '</div>';
+        } else if (!s.lotes.length) {
           html += '<div style="font-size:13px; color:#EF4444;">⛔ En esta ubicación no figura ningún lote con saldo. Marcá "Fecha no sirve" o pedí un ajuste.</div>';
         } else {
           // 16/11: una fila = desplegable de lote + cantidad; si no completa, aparece otra fila para el resto
@@ -4192,6 +4255,22 @@ async function pcConfirmar() {
     for (var b = 0; b < sacs.length; b++) {
       var s = sacs[b], partes = [], suma = 0, vistos = {};
       var filas = _pc.filas[a + '-' + b] || [];
+      if (s.deMas) {
+        // 18/11: de más → lote opcional, fecha obligatoria, sin tope
+        if (!filas.length) filas = _pcFilasDM(a, b, s);
+        for (var cM = 0; cM < filas.length; cM++) {
+          var qM = parseInt(filas[cM].cant, 10) || 0;
+          if (qM < 0) { _pcMsg('⚠ ' + l.cod + ': cantidad inválida', true); return; }
+          if (!qM) continue;
+          var fM = _pcFechaNorm(filas[cM].fecha);
+          if (!fM) { _pcMsg('⚠ ' + l.cod + ' (' + s.ubicacion + ', de más): poné la fecha de vencimiento (MM/AAAA) de las ' + qM + ' u.', true); return; }
+          partes.push({ lote: String(filas[cM].lote || '').trim().toUpperCase(), fecha: fM, cant: qM });
+          suma += qM;
+        }
+        if (suma !== s.cant) { _pcMsg('⚠ ' + l.cod + ' (' + s.ubicacion + ', de más): suman ' + suma + ' y se sacaron ' + s.cant, true); return; }
+        lotes.push({ idSacado: s.idSacado, partes: partes });
+        continue;
+      }
       for (var c = 0; c < filas.length; c++) {
         var q = parseInt(filas[c].cant, 10) || 0;
         if (q < 0) { _pcMsg('⚠ ' + l.cod + ': cantidad inválida', true); return; }
