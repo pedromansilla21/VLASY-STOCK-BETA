@@ -1196,6 +1196,10 @@
       <i class="ti ti-barcode"></i><span>Escaneo</span>
       <span class="nav-badge" id="badge-scanner" style="display:none;">0</span>
     </button>
+    <button class="nav-item" id="nav-control-ubic" onclick="switchPanel('control-ubic')" style="display:none;">
+      <i class="ti ti-clipboard-check"></i><span>Controlar ubicaciones</span>
+      <span class="nav-badge" id="badge-control-ubic" style="display:none;">0</span>
+    </button>
     <button class="nav-item" id="nav-stock-consulta" onclick="switchPanel('stock-consulta')">
       <i class="ti ti-search"></i><span>Stock Consulta</span>
     </button>
@@ -1986,6 +1990,18 @@
       <div id="mp-msg" style="display:none; padding:10px 14px; border-radius:8px; margin-bottom:12px; font-size:13px;"></div>
       <div id="mp-lista"></div>
     </div>
+    <!-- 19/11: CONTROLAR UBICACIONES (operario de afuera): contar lo que hay con lote y fecha -->
+    <div id="panel-control-ubic" class="panel">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Controlar ubicaciones</div>
+          <div class="page-sub" id="cu-sub">Ubicaciones que te mandaron a contar</div>
+        </div>
+        <div class="btn-row"><button class="btn" onclick="cuCargar()"><i class="ti ti-refresh"></i> Actualizar</button></div>
+      </div>
+      <div id="cu-msg" style="display:none; padding:10px 14px; border-radius:8px; margin-bottom:12px; font-size:13px;"></div>
+      <div id="cu-cont"></div>
+    </div>
    <!-- ═══ PANEL STOCK POR UBICACIÓN ═══ -->
 <div id="panel-stock-ubicacion" class="panel">
   <div class="page-header">
@@ -1993,8 +2009,10 @@
       <div class="page-title">Stock por Ubicación</div>
      <div class="page-sub">Reposición entre Palet, Reserva y Picking</div>
 </div>
-<button class="btn" onclick="suRefresh()" title="Recargar datos"><i class="ti ti-refresh"></i> Actualizar</button>
+<div class="btn-row"><button class="btn" id="su-btn-control" onclick="suModoControl()" title="Elegir ubicaciones para que un operario las cuente"><i class="ti ti-clipboard-check"></i> CONTROL</button>
+<button class="btn" onclick="suRefresh()" title="Recargar datos"><i class="ti ti-refresh"></i> Actualizar</button></div>
 </div>
+  <div id="su-barra-ctrl" class="card" style="display:none; padding:12px 16px; margin-bottom:12px; border-left:4px solid var(--c-amber); font-size:13px;"></div>
   <div class="su-herramientas">
     <div class="su-resumen" id="su-resumen"></div>
     <div class="su-buscar">
@@ -2693,6 +2711,7 @@ function switchPanel(name) {
   if (name === 'mis-pedidos' && typeof mpCargar === 'function') mpCargar(); // 1 lectura al entrar (etapa 9)
   if (name === 'ped-escaneo' && typeof peAbrir === 'function') peAbrir(); // 1 lectura al entrar (etapa 10)
   if (name === 'ped-control' && typeof pcCargar === 'function') pcCargar(); // 1 lectura al entrar (etapa 11)
+  if (name === 'control-ubic' && typeof cuCargar === 'function') cuCargar(); // 19/11: 1 lectura al entrar
   if (name === 'reporte-compras') renderReporteCompras();
   if (name === 'carga-remito') { /* ya está renderizado */ }
   if (name === 'completar-control') {
@@ -2752,6 +2771,7 @@ function updateClock() {
       if (_busy_syncOrdenes) return setTimeout(_esperarYRevisar, 500);
       _checkAlertaEscaneo();
      if (typeof _checkTareaReposicion === 'function') _checkTareaReposicion();
+      if (typeof cuAviso === 'function') cuAviso(); // 19/11: 1 lectura, ubicaciones para controlar
     };
        if (_edicionManualPendiente) {
       var _fEd = CURRENT_USER.filaAlerta || 1;
@@ -3216,8 +3236,11 @@ async function suAbrirReponer(cod) {
     document.getElementById('rp-desc').textContent = art ? art.desc : '';
     document.getElementById('rp-total').textContent = '0 u.';
         document.getElementById('rp-lotes').innerHTML = lotes.map(function(l) {
-      return '<tr data-ubi="' + l.ubi + '"><td>' + l.cant + '</td><td>' + l.fecha + '</td><td>' + l.lote +
-        '</td><td><input type="number" min="0" max="' + l.cant + '" value="0" oninput="suTotalMover()"></td></tr>';
+      // 19/11: reserva SIN CONTROL → sin tope (el número todavía no es real)
+      var du = _suDatos.find(function(x) { return x.codUbi.toUpperCase() === String(l.ubi).toUpperCase(); });
+      var sc = du && du.control === 'SIN CONTROL';
+      return '<tr data-ubi="' + l.ubi + '"><td>' + l.cant + (sc ? ' <span style="font-size:10px; color:var(--c-text3);">sin control</span>' : '') + '</td><td>' + l.fecha + '</td><td>' + l.lote +
+        '</td><td><input type="number" min="0"' + (sc ? '' : ' max="' + l.cant + '"') + ' value="0" oninput="suTotalMover()"></td></tr>';
     }).join('');
        document.getElementById('rp-operario').innerHTML = loadUsers().filter(function(u){ return u.rol === 'operario' && u.filaAlerta; }).map(function(u) {
       return '<option value="' + u.name + '">' + u.name + '</option>';
@@ -3271,6 +3294,75 @@ function suTotalMover() {
   showToast(n ? 'Tarea creada (' + n + ')' : 'Poné una cantidad a mover');
   if (n) suCerrarReponer();
 }
+// ── 19/11 CONTROL DE UBICACIONES (lado admin): elegir varias y mandarlas a controlar a un operario ──
+var _suControles = {};   // codigo ubicación (MAYÚS) → control PENDIENTE {id, operario, ...}
+var _suModoCtrl = false;
+var _suElegidas = {};
+function _suFechaCorta(f) {
+  var d = f ? new Date(f) : null;
+  return d && !isNaN(d) ? ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) : '';
+}
+function _suBadgeCtrl(d, cu) {
+  var st = 'display:inline-block; margin-top:4px; font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px;';
+  var b = '';
+  if (d.control === 'DIFERENCIA') b = '<span style="' + st + ' background:var(--c-red-bg); color:var(--c-red);" title="Se sacó de más o dijeron que no hay: mandala a controlar">⚠ DIFERENCIA' + (d.deMasPend ? ' · ' + d.deMasPend + ' de más' : ' · dijeron que no hay') + '</span>';
+  else if (d.control === 'CONTROLADA') b = '<span style="' + st + ' background:var(--c-green-bg); color:var(--c-green);" title="' + escHtml(d.ctrlPor) + '">✓ CONTROLADA ' + _suFechaCorta(d.fechaCtrl) + '</span>';
+  else b = '<span style="' + st + ' background:var(--c-surface3); color:var(--c-text3);" title="Todavía no se contó: se saca sin descontar">SIN CONTROL</span>';
+  if (cu) b += ' <span style="' + st + ' background:var(--c-amber-bg); color:var(--c-amber);">🔎 ' + escHtml(cu.operario) +
+    (_suModoCtrl ? ' <a href="#" onclick="suAnularControl(\'' + escHtml(cu.id) + '\'); return false;" style="color:var(--c-red); margin-left:4px;" title="Anular">✖</a>' : '') + '</span>';
+  return '<div>' + b + '</div>';
+}
+function suModoControl() {
+  _suModoCtrl = !_suModoCtrl;
+  _suElegidas = {};
+  suRenderizar(_suDatos);
+}
+function suElegir(el) {
+  if (el.checked) _suElegidas[el.dataset.c] = true; else delete _suElegidas[el.dataset.c];
+  _suPintarBarraCtrl();
+}
+function _suPintarBarraCtrl() {
+  var bar = document.getElementById('su-barra-ctrl');
+  var btn = document.getElementById('su-btn-control');
+  if (btn) btn.classList.toggle('su-btn-rep', _suModoCtrl);
+  if (!bar) return;
+  if (!_suModoCtrl) { bar.style.display = 'none'; return; }
+  var n = Object.keys(_suElegidas).length;
+  var ops = loadUsers().filter(function(u) { return u.rol === 'operario'; });
+  var prev = _val('su-ctrl-op');
+  bar.style.display = '';
+  bar.innerHTML = '<b>' + n + '</b> ubicación(es) elegida(s). Mandar a controlar a ' +
+    '<select id="su-ctrl-op" style="padding:6px 8px; margin:0 6px;">' + ops.map(function(u) { return '<option' + (u.name === prev ? ' selected' : '') + '>' + escHtml(u.name) + '</option>'; }).join('') + '</select>' +
+    '<button class="btn btn-primary btn-sm" onclick="suMandarControl()"' + (n ? '' : ' disabled') + '><i class="ti ti-send"></i> Mandar</button> ' +
+    '<button class="btn btn-sm" onclick="suModoControl()">Cancelar</button>' +
+    '<div style="font-size:12px; color:var(--c-text3); margin-top:6px;">Tildá las ubicaciones en la lista. Al contar, la ubicación queda CONTROLADA con lo que cuente el operario.</div>';
+}
+async function suMandarControl() {
+  if (window._busy_suCtrl) return;
+  var cods = Object.keys(_suElegidas), op = _val('su-ctrl-op');
+  if (!cods.length || !op) return;
+  window._busy_suCtrl = true;
+  try {
+    var r = await _prPost({ accion: 'asignarControlUbic', usuario: (CURRENT_USER && CURRENT_USER.name) || '', operario: op, codigos: cods });
+    showToast('🔎 ' + (r.nuevas + r.cambiadas) + ' ubicación(es) para controlar → ' + r.operario);
+    _suModoCtrl = false; _suElegidas = {};
+    suRefresh();
+  } catch (e) {
+    showToast('⛔ No se mandó: ' + e.message);
+  } finally {
+    window._busy_suCtrl = false;
+  }
+}
+async function suAnularControl(id) {
+  if (!confirm('¿Anular este control? La ubicación queda como está.')) return;
+  try {
+    await _prPost({ accion: 'anularControlUbic', usuario: (CURRENT_USER && CURRENT_USER.name) || '', id: id });
+    showToast('Control anulado');
+    suRefresh();
+  } catch (e) {
+    showToast('⛔ ' + e.message);
+  }
+}
  var _suDatos = [];
 var _suCargado = false;
 
@@ -3283,10 +3375,13 @@ function suRefresh() {
 async function suLoad() {
   if (_suCargado) return;
   try {
-    var url = GAS_URL + '?accion=leerRango&rango=' + encodeURIComponent("'STOCK POR UBICACION'!A:N");
+    var url = GAS_URL + '?accion=leerRango&rango=' + encodeURIComponent("'STOCK POR UBICACION'!A:Q");
     var resp = await fetch(url, { cache: 'no-store' });
     var data = await resp.json();
     if (!data.ok || !Array.isArray(data.data)) throw new Error('Sin datos');
+    // 19/11: controles PENDIENTE (a quién se mandó a controlar cada ubicación)
+    _suControles = {};
+    try { ((await _prGet('accion=controlesUbic')).controles || []).forEach(function(c) { _suControles[c.codigo] = c; }); } catch (eC) {}
 
     _suDatos = data.data
       .filter(function(row) {
@@ -3311,7 +3406,12 @@ async function suLoad() {
           ubicacion:  String(row[9]  || '—').trim(),
           tipoUbi:    String(row[10] || '—').trim(),
           estado:     String(row[11] || 'OK').trim(),
-          codUbi:     String(row[12] || '—').trim()
+          codUbi:     String(row[12] || '—').trim(),
+          // 19/11: N vacío = SIN CONTROL · CONTROLADA · DIFERENCIA; O = de más pendientes; P = fecha control; Q = quién
+          control:    String(row[13] || '').trim().toUpperCase() || 'SIN CONTROL',
+          deMasPend:  parseInt(row[14], 10) || 0,
+          fechaCtrl:  String(row[15] || '').trim(),
+          ctrlPor:    String(row[16] || '').trim()
         };
       });
 
@@ -3338,13 +3438,25 @@ function _suRenderResumen(todos) {
   function tile(clase, estado, cant, texto) {
     return '<button class="su-tile ' + clase + (_suFiltroEstado === estado ? ' activo' : '') + '" onclick="suFiltrar(\'' + estado + '\')"><b>' + cant + '</b>' + texto + '</button>';
   }
+  var nSC = todos.filter(function(d) { return d.control === 'SIN CONTROL'; }).length;
+  var nDif = todos.filter(function(d) { return d.control === 'DIFERENCIA'; }).length;
+  var nEnc = todos.filter(function(d) { return _suControles[d.codUbi.toUpperCase()]; }).length;
   el.innerHTML = tile('urg', 'REPONER URG', n.urg, 'Reponer urgente') +
     tile('fal', 'POSIBLE FALTANTE', n.fal, 'Posible faltante') +
-    tile('ok', 'OK', n.ok, 'OK');
+    tile('ok', 'OK', n.ok, 'OK') +
+    tile('urg', '_DIF', nDif, '⚠ Diferencias') +
+    tile('', '_SC', nSC, 'Sin control') +
+    tile('fal', '_ENC', nEnc, '🔎 Para controlar');
 }
 function suRenderizar(datos) {
   _suRenderResumen(datos);
-  if (_suFiltroEstado) { datos = datos.filter(function(d) { return d.estado === _suFiltroEstado; }); }
+  if (_suFiltroEstado) { datos = datos.filter(function(d) {
+    if (_suFiltroEstado === '_SC') return d.control === 'SIN CONTROL';
+    if (_suFiltroEstado === '_DIF') return d.control === 'DIFERENCIA';
+    if (_suFiltroEstado === '_ENC') return !!_suControles[d.codUbi.toUpperCase()];
+    return d.estado === _suFiltroEstado;
+  }); }
+  _suPintarBarraCtrl();
   var _qEl = document.getElementById('su-buscar');
   var _q = _qEl ? _qEl.value.trim().toLowerCase() : '';
   if (_q) { datos = datos.filter(function(d) { return (d.cod + ' ' + d.desc).toLowerCase().indexOf(_q) > -1; }); }
@@ -3367,11 +3479,13 @@ function suRenderizar(datos) {
                        d.estado === 'POSIBLE FALTANTE' ? 'Posible faltante' : d.estado;
     var mostrarReponer = d.estado !== 'OK';
     var claseTipo = /PICKING/i.test(d.tipoUbi) ? 'picking' : /RESERVA|REPOSICION/i.test(d.tipoUbi) ? 'reserva' : '';
+    var cu = _suControles[d.codUbi.toUpperCase()];
+    var chk = _suModoCtrl ? '<input type="checkbox" class="su-chk" data-c="' + escHtml(d.codUbi) + '"' + (_suElegidas[d.codUbi] ? ' checked' : '') + ' onclick="suElegir(this)" style="width:20px; height:20px; margin-right:8px; vertical-align:middle;">' : '';
     return '<tr style="--su-color:' + colorEstado + ';--su-fondo:' + bgEstado + ';">' +
-      '<td><div class="su-cod">' + escHtml(d.cod) + '</div><div class="su-desc">' + escHtml(d.desc) + '</div></td>' +
+      '<td>' + chk + '<div style="display:inline-block; vertical-align:middle;"><div class="su-cod">' + escHtml(d.cod) + '</div><div class="su-desc">' + escHtml(d.desc) + '</div></div></td>' +
       '<td class="su-marca su-col-marca">' + escHtml(d.marca) + '</td>' +
       '<td><div class="su-ubi">' + escHtml(d.ubicacion) + '</div><div class="su-tipo ' + claseTipo + '">' + escHtml(d.tipoUbi) + '</div>' +
-        '</td>' +
+        _suBadgeCtrl(d, cu) + '</td>' +
       '<td><div class="su-stock"><b>' + d.stock + '</b>' + (d.optimo ? '<span>/ ' + d.optimo + '</span>' : '') +
         '<div class="su-barra"><i style="width:' + Math.min(100, d.pct) + '%;"></i></div></div></td>' +
       '<td style="text-align:center;">' + (d.faltante > 0 ? '<span class="su-falta">' + d.faltante + '</span>' : '<span class="su-sinfalta">—</span>') + '</td>' +
@@ -4179,8 +4293,9 @@ function _pcParteHtml(p) {
         html += '<div style="margin-top:10px; padding:10px 12px; border-radius:8px; background:var(--c-surface2);">' +
           '<div style="font-size:13px; margin-bottom:6px;"><span style="font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; background:' + tc + '22; color:' + tc + ';">' + escHtml(s.tipo) + '</span> ' +
           '<span class="mono">' + escHtml(s.ubicacion) + '</span> — sacó <b>' + s.cant + '</b>. ¿De qué lote?' +
-          (s.deMas ? ' <span style="font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; background:#EF444422; color:#EF4444;">⚠ ' + s.cant + ' DE MÁS (el sistema no las tenía)</span>' : '') + '</div>';
-        if (s.deMas) {
+          (s.deMas ? ' <span style="font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; background:#EF444422; color:#EF4444;">⚠ ' + s.cant + ' DE MÁS (el sistema no las tenía)</span>' : '') +
+          (!s.deMas && s.sinControl ? ' <span style="font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; background:#8b949e22; color:#8b949e;">SIN CONTROL: escribí lote y fecha</span>' : '') + '</div>';
+        if (s.deMas || s.sinControl) {
           // 18/11: de más → lote y fecha reales que tiene en la mano; los lotes de la ubicación son solo sugerencia
           var filasM = _pcFilasDM(a, b, s), asigM = 0, dl = 'pc-dl-' + a + '-' + b;
           html += '<datalist id="' + dl + '">' + s.lotes.map(function(L) { return '<option value="' + escHtml(L.lote) + '">vence ' + escHtml(L.fecha || '—') + '</option>'; }).join('') + '</datalist>';
@@ -4255,8 +4370,8 @@ async function pcConfirmar() {
     for (var b = 0; b < sacs.length; b++) {
       var s = sacs[b], partes = [], suma = 0, vistos = {};
       var filas = _pc.filas[a + '-' + b] || [];
-      if (s.deMas) {
-        // 18/11: de más → lote opcional, fecha obligatoria, sin tope
+      if (s.deMas || s.sinControl) {
+        // 18/11: de más → lote opcional, fecha obligatoria, sin tope (19/11: también ubicación SIN CONTROL)
         if (!filas.length) filas = _pcFilasDM(a, b, s);
         for (var cM = 0; cM < filas.length; cM++) {
           var qM = parseInt(filas[cM].cant, 10) || 0;
@@ -4852,6 +4967,195 @@ async function peTerminar() {
   } finally {
     _pe.busy = false;
     if (_pe.datos) peRender();
+  }
+}
+
+// ── 19/11 CONTROLAR UBICACIONES (operario de afuera) ──
+// 1 lectura al entrar / Actualizar (controlesUbic), 1 escritura al confirmar (confirmarControlUbic).
+// Escanea la ubicación, después carga lo que hay: lote + fecha + cantidad (o escanea las cajas/unidades y suman en la fila marcada).
+var _cu = { lista: null, act: null, escOk: false, filas: [], filaAct: 0, vacia: false, busy: false };
+function _cuMsg(m, err) {
+  var el = document.getElementById('cu-msg');
+  if (!el) return;
+  el.innerHTML = m || '';
+  el.style.display = m ? '' : 'none';
+  el.style.background = err ? 'rgba(239,68,68,0.12)' : 'var(--c-surface2)';
+  el.style.color = err ? '#EF4444' : 'var(--c-text2)';
+}
+async function cuCargar() {
+  if (_cu.act && !confirm('¿Salir de este control? Se pierde lo cargado.')) return;
+  _cu.act = null;
+  _cuMsg('Cargando…');
+  try {
+    _cu.lista = (await _prGet('accion=controlesUbic&usuario=' + encodeURIComponent((CURRENT_USER && CURRENT_USER.name) || ''))).controles || [];
+    _cuMsg('');
+  } catch (e) {
+    _cuMsg('No se pudo leer: ' + escHtml(e.message), true);
+    return;
+  }
+  _cuBadge(_cu.lista.length);
+  _cuRender();
+}
+function _cuBadge(n) {
+  var b = document.getElementById('badge-control-ubic');
+  if (b) { b.textContent = n; b.style.display = n ? '' : 'none'; }
+}
+// Desde "Revisar alertas": avisa si tiene ubicaciones para controlar
+async function cuAviso() {
+  try {
+    var l = (await _prGet('accion=controlesUbic&usuario=' + encodeURIComponent((CURRENT_USER && CURRENT_USER.name) || ''))).controles || [];
+    _cuBadge(l.length);
+    if (l.length) showToast('🔎 Tenés ' + l.length + ' ubicación(es) para controlar (menú "Controlar ubicaciones")');
+  } catch (e) {}
+}
+function _cuLeerInputs() {
+  document.querySelectorAll('.cu-l').forEach(function(el) { var r = _cu.filas[el.dataset.i]; if (r) r.lote = el.value.trim().toUpperCase(); });
+  document.querySelectorAll('.cu-f').forEach(function(el) { var r = _cu.filas[el.dataset.i]; if (r) r.fecha = el.value.trim(); });
+  document.querySelectorAll('.cu-q').forEach(function(el) { var r = _cu.filas[el.dataset.i]; if (r) r.cant = el.value; });
+}
+function _cuRender() {
+  var c = document.getElementById('cu-cont');
+  if (!c) return;
+  var sub = document.getElementById('cu-sub');
+  var x = _cu.act;
+  if (!x) {
+    if (sub) sub.textContent = 'Ubicaciones que te mandaron a contar';
+    var l = _cu.lista || [];
+    c.innerHTML = l.length ? l.map(function(u, n) {
+      return '<div class="card" onclick="cuAbrir(' + n + ')" style="cursor:pointer; margin-bottom:10px; padding:14px 16px; border-left:4px solid var(--c-amber); display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">' +
+        '<div><span style="font-weight:800; font-size:18px;">📍 ' + escHtml(u.ubic) + '</span> <span style="font-size:12px; color:var(--c-text3);">' + escHtml(u.tipo || '') + '</span>' +
+        '<div style="margin-top:3px;"><span class="mono" style="font-weight:700;">' + escHtml(u.cod) + '</span> ' + escHtml(u.desc || '') + '</div>' +
+        '<div style="font-size:11px; color:var(--c-text3); margin-top:2px;">Mandado por ' + escHtml(u.por) + '</div></div>' +
+        '<span class="btn btn-sm btn-primary">Contar <i class="ti ti-chevron-right"></i></span></div>';
+    }).join('') : '<div class="card" style="padding:32px; text-align:center; color:var(--c-text3);"><i class="ti ti-clipboard-check" style="font-size:32px;"></i><div style="margin-top:8px;">No tenés ubicaciones para controlar.</div></div>';
+    return;
+  }
+  if (sub) sub.textContent = 'Contando ' + x.ubic;
+  var dl = '<datalist id="cu-dl">' + (x.lotes || []).map(function(L) { return '<option value="' + escHtml(L.lote) + '">vence ' + escHtml(L.fecha || '—') + '</option>'; }).join('') + '</datalist>';
+  var html = '<div class="card" style="margin-bottom:12px; padding:12px 16px; border-left:4px solid var(--c-amber); display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">' +
+    '<div><span style="font-weight:800; font-size:20px;">📍 ' + escHtml(x.ubic) + '</span> <span style="font-size:12px; color:var(--c-text3);">' + escHtml(x.tipo || '') + '</span>' +
+    '<div style="margin-top:3px;"><span class="mono" style="font-weight:700; color:var(--c-amber);">' + escHtml(x.cod) + '</span> ' + escHtml(x.desc || '') + '</div></div>' +
+    '<button class="btn btn-sm" onclick="cuVolver()"><i class="ti ti-arrow-left"></i> Volver</button></div>';
+  html += '<div class="card" style="padding:14px 16px; margin-bottom:12px;">' +
+    '<div style="font-size:13px; font-weight:700; margin-bottom:6px;">' + (_cu.escOk ? '✅ Ubicación escaneada. Escaneá las cajas/unidades (suman en la fila marcada ▶) o escribí la cantidad.' : '1) Escaneá la etiqueta de la ubicación') + '</div>' +
+    '<input id="cu-scan" type="text" autocomplete="off" placeholder="' + (_cu.escOk ? 'Escanear artículo' : 'Escanear ubicación') + '" onkeydown="if(event.key===\'Enter\'){cuScan(this.value); this.value=\'\';}" style="width:100%; padding:10px; font-size:15px;"></div>';
+  if (_cu.escOk) {
+    var tot = 0;
+    html += '<div class="card" style="padding:14px 16px;">' + dl +
+      '<label style="display:flex; align-items:center; gap:8px; font-size:14px; font-weight:700; margin-bottom:10px;"><input type="checkbox" ' + (_cu.vacia ? 'checked' : '') + ' onchange="cuVacia(this.checked)" style="width:20px; height:20px;"> La ubicación está VACÍA (no hay nada de este artículo)</label>';
+    if (!_cu.vacia) {
+      html += '<div style="font-size:12px; color:var(--c-text3); margin-bottom:4px;">2) Por cada lote: lote, vencimiento (MM/AAAA) y cantidad. Todo obligatorio.</div>';
+      _cu.filas.forEach(function(f, i) {
+        tot += parseInt(f.cant, 10) || 0;
+        var act = i === _cu.filaAct;
+        html += '<div style="display:flex; align-items:center; gap:8px; margin-top:6px; font-size:13px; flex-wrap:wrap; padding:6px; border-radius:8px;' + (act ? ' background:var(--c-amber-bg);' : '') + '">' +
+          '<button class="btn btn-sm" onclick="cuFilaAct(' + i + ')" title="Los escaneos suman acá" style="min-width:34px;">' + (act ? '▶' : '○') + '</button>' +
+          '<input type="text" class="cu-l" data-i="' + i + '" list="cu-dl" value="' + escHtml(f.lote) + '" placeholder="Lote *" onchange="cuFila(' + i + ',\'l\',this.value)" style="flex:1; min-width:120px; padding:7px;">' +
+          '<input type="text" class="cu-f" data-i="' + i + '" value="' + escHtml(f.fecha) + '" placeholder="Vence MM/AAAA *" inputmode="numeric" onchange="cuFila(' + i + ',\'f\',this.value)" style="width:130px; text-align:center; padding:7px;' + (f.fecha && !_pcFechaNorm(f.fecha) ? ' border-color:#EF4444;' : '') + '">' +
+          '<input type="number" min="0" class="cu-q" data-i="' + i + '" value="' + escHtml(f.cant) + '" placeholder="cant. *" onchange="cuFila(' + i + ',\'c\',this.value)" style="width:90px; text-align:center; padding:7px;">' +
+          '<span style="color:var(--c-text3);">u.</span>' +
+          (_cu.filas.length > 1 ? '<button class="btn btn-sm" onclick="cuQuitarFila(' + i + ')" title="Quitar fila" style="color:#EF4444;">✖</button>' : '') + '</div>';
+      });
+      html += '<button class="btn btn-sm" onclick="cuOtraFila()" style="margin-top:8px;"><i class="ti ti-plus"></i> Otro lote</button>' +
+        '<div style="font-size:15px; font-weight:800; margin-top:10px;">Total contado: ' + tot + ' u.</div>';
+    }
+    html += '</div><div style="display:flex; justify-content:flex-end; margin-top:14px;"><button class="btn btn-primary" onclick="cuConfirmar()"' + (_cu.busy ? ' disabled' : '') + '><i class="ti ti-check"></i> Confirmar conteo</button></div>';
+  }
+  c.innerHTML = html;
+  setTimeout(function() { var s = document.getElementById('cu-scan'); if (s) s.focus(); }, 50);
+}
+function cuAbrir(n) {
+  var x = (_cu.lista || [])[n];
+  if (!x) return;
+  _cu.act = x; _cu.escOk = false; _cu.filas = [{ lote: '', fecha: '', cant: '' }]; _cu.filaAct = 0; _cu.vacia = false;
+  _cuMsg('');
+  _cuRender();
+}
+function cuVolver() {
+  if (_cu.escOk && !confirm('¿Volver a la lista? Se pierde lo cargado de esta ubicación.')) return;
+  _cu.act = null; _cuMsg(''); _cuRender();
+}
+function cuScan(raw) {
+  raw = String(raw || '').trim();
+  var x = _cu.act;
+  if (!raw || !x) return;
+  if (!_cu.escOk) {
+    if (raw.toUpperCase() !== x.codigo) { _cuMsg('⛔ Esa no es la ubicación. Escaneá ' + escHtml(x.ubic) + ' (' + escHtml(x.codigo) + ')', true); return; }
+    _cu.escOk = true; _cuMsg('');
+    _cuRender();
+    return;
+  }
+  if (raw.toUpperCase() === x.codigo) { _cuMsg('📍 Ya escaneaste la ubicación. Ahora el artículo.'); return; }
+  var art = db.find(function(a) { return String(a.cbCaja).trim() === raw || String(a.cbSuelto).trim() === raw || String(a.cod).trim() === raw; });
+  if (!art) { _cuMsg('⛔ Código no encontrado: ' + escHtml(raw), true); return; }
+  if (String(art.cod).trim() !== x.cod) { _cuMsg('⛔ ' + escHtml(art.desc || art.cod) + ' no es el artículo de esta ubicación (' + escHtml(x.cod) + '). Avisá en la oficina.', true); return; }
+  if (_cu.vacia) { _cuMsg('⛔ Marcaste la ubicación como vacía', true); return; }
+  var esCaja = !!art.cbCaja && String(art.cbCaja).trim() === raw;
+  var n = esCaja ? (parseInt(art.cantCaja, 10) || 0) : (parseInt(art.unidSuelto, 10) || 1);
+  if (!n) { _cuMsg('⛔ La caja no tiene unidades cargadas en Artículos', true); return; }
+  _cuLeerInputs();
+  var f = _cu.filas[_cu.filaAct] || _cu.filas[0];
+  f.cant = String((parseInt(f.cant, 10) || 0) + n);
+  _cuMsg('✓ +' + n + (f.lote ? ' en lote ' + escHtml(f.lote) : ''));
+  _cuRender();
+}
+function cuFila(i, campo, v) {
+  _cuLeerInputs();
+  var r = _cu.filas[i];
+  if (!r) return;
+  if (campo === 'l') {
+    r.lote = String(v || '').trim().toUpperCase();
+    var L = (_cu.act.lotes || []).filter(function(x) { return String(x.lote).toUpperCase() === r.lote; })[0];
+    if (L && !r.fecha) r.fecha = L.fecha || '';
+  } else if (campo === 'f') {
+    r.fecha = _pcFechaNorm(v) || String(v || '').trim();
+  } else {
+    r.cant = v;
+  }
+  _cuRender();
+}
+function cuFilaAct(i) { _cuLeerInputs(); _cu.filaAct = i; _cuRender(); }
+function cuOtraFila() { _cuLeerInputs(); _cu.filas.push({ lote: '', fecha: '', cant: '' }); _cu.filaAct = _cu.filas.length - 1; _cuRender(); }
+function cuQuitarFila(i) {
+  _cuLeerInputs();
+  _cu.filas.splice(i, 1);
+  if (!_cu.filas.length) _cu.filas.push({ lote: '', fecha: '', cant: '' });
+  _cu.filaAct = Math.min(_cu.filaAct, _cu.filas.length - 1);
+  _cuRender();
+}
+function cuVacia(v) { _cuLeerInputs(); _cu.vacia = !!v; _cuRender(); }
+async function cuConfirmar() {
+  var x = _cu.act;
+  if (!x || _cu.busy || !_cu.escOk) return;
+  _cuLeerInputs();
+  var filas = [], tot = 0;
+  if (!_cu.vacia) {
+    for (var i = 0; i < _cu.filas.length; i++) {
+      var f = _cu.filas[i], q = parseInt(f.cant, 10) || 0;
+      if (!f.lote && !f.fecha && !q) continue;
+      if (q <= 0 || String(q) !== String(f.cant).trim()) { _cuMsg('⚠ Fila ' + (i + 1) + ': poné la cantidad', true); return; }
+      if (!f.lote) { _cuMsg('⚠ Fila ' + (i + 1) + ': falta el lote', true); return; }
+      var fe = _pcFechaNorm(f.fecha);
+      if (!fe) { _cuMsg('⚠ Fila ' + (i + 1) + ': falta la fecha de vencimiento (MM/AAAA)', true); return; }
+      filas.push({ lote: f.lote, fecha: fe, cant: String(q) });
+      tot += q;
+    }
+    if (!filas.length) { _cuMsg('⚠ Cargá lo que hay, o tildá "La ubicación está VACÍA"', true); return; }
+  }
+  if (!confirm('¿Confirmar el conteo de ' + x.ubic + '?\n\n' + (_cu.vacia ? 'VACÍA (0 u.)' : filas.map(function(f) { return 'Lote ' + f.lote + ' · ' + f.fecha + ' · ' + f.cant + ' u.'; }).join('\n') + '\nTotal: ' + tot + ' u.') +
+    '\n\nLa ubicación queda con esto y pasa a CONTROLADA.')) return;
+  _cu.busy = true;
+  _cuMsg('Guardando…');
+  try {
+    var r = await _prPost({ accion: 'confirmarControlUbic', usuario: (CURRENT_USER && CURRENT_USER.name) || '', id: x.id, escaneo: x.codigo, filas: filas });
+    showToast(r.ya ? 'Ya estaba guardado' : '✅ ' + x.ubic + ' controlada: ' + r.despues + ' u. (antes figuraban ' + r.antes + ')');
+    _cu.busy = false;
+    _cu.act = null;
+    await cuCargar();
+  } catch (e) {
+    _cuMsg('⛔ No se guardó: ' + escHtml(e.message), true);
+  } finally {
+    _cu.busy = false;
   }
 }
 
@@ -11458,7 +11762,7 @@ function aplicarRol(rol) {
   // Resetear todo primero — ocultar todo
   var navScanner = document.getElementById('nav-scanner');
   if (navScanner) navScanner.style.display = 'none';
-  ['nav-remito','nav-ordenes','nav-reporte-compras','nav-registro','nav-basedatos','nav-stock-consulta','nav-buscador-palets','nav-stock-ubicacion','nav-usuarios','nav-ped-reporte','nav-ped-control','nav-ped-escaneo','nav-mis-pedidos'].forEach(function(id) {
+  ['nav-remito','nav-ordenes','nav-reporte-compras','nav-registro','nav-basedatos','nav-stock-consulta','nav-buscador-palets','nav-stock-ubicacion','nav-usuarios','nav-ped-reporte','nav-ped-control','nav-ped-escaneo','nav-mis-pedidos','nav-control-ubic'].forEach(function(id) {
     var el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -11477,8 +11781,9 @@ function aplicarRol(rol) {
     switchPanel('buscador-palets');
     return;
   } else if (esOperario) {
-    // Operario solo ve Escaneo
+    // Operario solo ve Escaneo (19/11: y Controlar ubicaciones)
     if (navScanner) navScanner.style.display = '';
+    var _nCU = document.getElementById('nav-control-ubic'); if (_nCU) _nCU.style.display = '';
     switchPanel('scanner');
     _revisarSesionGuardada();
     // Iniciar sincronización de alertas
@@ -11504,7 +11809,7 @@ function aplicarRol(rol) {
   } else {
     // Administrativo — ve todo incluyendo Stock Consulta y Buscador de Palets
     if (navScanner) navScanner.style.display = '';
-    ['nav-remito','nav-ordenes','nav-registro','nav-basedatos','nav-usuarios','nav-stock-consulta','nav-buscador-palets','nav-stock-ubicacion','nav-ped-reporte'].forEach(function(id) {
+    ['nav-remito','nav-ordenes','nav-registro','nav-basedatos','nav-usuarios','nav-stock-consulta','nav-buscador-palets','nav-stock-ubicacion','nav-ped-reporte','nav-control-ubic'].forEach(function(id) {
       var el = document.getElementById(id);
       if (el) el.style.display = '';
     });
