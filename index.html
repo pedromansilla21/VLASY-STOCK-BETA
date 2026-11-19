@@ -8520,6 +8520,16 @@ function _uEspBase(l) {
     : (l.cantUnidades || 0);
 }
 
+// Línea retirada 100% por reposición (no es faltante): cantUnidades=0 con lote o fecha
+// (se escaneó y después se sacó todo). En 0 sin lote ni fecha = no se escaneó: queda a la vista
+// para ver si el operario se salteó algo (regla de Pedro 06/11)
+function _lineaRetiradaRep(l) {
+  var _sinGuion = function(v){ v = String(v || '').trim(); return v && !/^[-–—\s]+$/.test(v); };
+  var _teniaLoteFecha = _sinGuion(l.lote) || _sinGuion(l.fechaLote) ||
+    (l.divisiones || []).some(function(d){ return _sinGuion(d.lote) || (d.mes && d.anio); });
+  return (l.cantUnidades || 0) === 0 && _teniaLoteFecha;
+}
+
 function renderOrdenes() {
   // Guardar qué cards están abiertas para restaurarlas después del re-render
   var abiertos = [];
@@ -8745,9 +8755,7 @@ function renderResumenEscaneo(oc) {
   // cantUnidades=0 + (tenía divisiones O tenía cantUnidadesAlEscaneo > 0)
   // Estas no son faltantes — el operario las tenía y se repusieron.
   var lineas = _lineasBase.filter(function(l) {
-    var fueRetiradoTotal = (l.cantUnidades || 0) === 0 &&
-      (typeof l.divisiones !== 'undefined' || (l.cantUnidadesAlEscaneo || 0) > 0);
-    return !fueRetiradoTotal;
+    return !_lineaRetiradaRep(l);
   });
   var completas   = lineas.filter(function(l){
     var uCtrl = l.unidadesControladas||0;
@@ -8823,8 +8831,10 @@ function renderLineasOCTable(lineas, ocId) {
   var uid = ocId ? String(ocId).replace(/[^a-zA-Z0-9_-]/g, '_') : 'noid';
 
   // Resumen rápido
-  var total     = lineas.length;
-  var completas = lineas.filter(function(l){ return (l.unidadesControladas||0) > 0 && (l.unidadesControladas||0) === _uEspBase(l); }).length;
+  // El resumen cuenta solo las líneas que se muestran (no las retiradas 100% por reposición)
+  var _lineasVis = lineas.filter(function(l){ return !_lineaRetiradaRep(l); });
+  var total     = _lineasVis.length;
+  var completas = _lineasVis.filter(function(l){ return (l.unidadesControladas||0) > 0 && (l.unidadesControladas||0) === _uEspBase(l); }).length;
   var conLote   = lineas.filter(function(l){
     return (l.lote && l.lote.trim()) ||
            (l.divisiones && l.divisiones.some(function(d){ return d.lote && String(d.lote).trim(); }));
@@ -8872,12 +8882,7 @@ function renderLineasOCTable(lineas, ocId) {
     // Solo se oculta si tiene lote o fecha (se escaneó y ya no queda nada).
     // En 0 sin lote ni fecha = no se escaneó: queda a la vista para ver si
     // el operario se salteó algo (regla de Pedro 06/11)
-    var _sinGuion = function(v){ v = String(v || '').trim(); return v && !/^[-–—\s]+$/.test(v); };
-    var _teniaLoteFecha = _sinGuion(l.lote) || _sinGuion(l.fechaLote) ||
-      (l.divisiones || []).some(function(d){ return _sinGuion(d.lote) || (d.mes && d.anio); });
-    var fueRetiradoTotal = (l.cantUnidades || 0) === 0 && _teniaLoteFecha &&
-      (typeof l.divisiones !== 'undefined' || (l.cantUnidadesAlEscaneo || 0) > 0);
-    if (fueRetiradoTotal) return;
+    if (_lineaRetiradaRep(l)) return;
 
     if (l.divisiones && l.divisiones.length > 0) {
       // Si TODAS las divisiones están en 0, saltar el artículo completo
