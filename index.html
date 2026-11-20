@@ -1277,7 +1277,7 @@
           <div class="field"><label>Cant. hojas</label><input id="ped-hojas" type="number" min="1" placeholder="1" /></div>
         </div>
         <div class="form-grid-4" style="align-items:flex-end;">
-          <div class="field" style="grid-column: span 2;"><label>Artículo <span style="font-weight:400;color:var(--c-text3)">(código o nombre)</span></label><input id="ped-art" list="ped-art-list" autocomplete="off" placeholder="Ej: 01004-4" /><datalist id="ped-art-list"></datalist></div>
+          <div class="field" style="grid-column: span 2;"><label>Artículo <span style="font-weight:400;color:var(--c-text3)">(código o nombre)</span></label><input id="ped-art" list="ped-art-list" autocomplete="off" placeholder="Ej: 01004-4" onkeydown="if(event.key==='Enter'){event.preventDefault();pedArtEnter();}" oninput="_pedArtDesc()" /><datalist id="ped-art-list"></datalist><div id="ped-art-desc" style="font-size:12px; color:var(--c-text3); margin-top:3px; min-height:15px;"></div></div>
           <div class="field"><label>Cantidad</label><input id="ped-cant" type="number" min="1" placeholder="Ej: 24" onkeydown="if(event.key==='Enter') pedAgregarLinea()" /></div>
           <div class="field"><label>Hoja</label><input id="ped-hoja" type="number" min="1" placeholder="1" onkeydown="if(event.key==='Enter') pedAgregarLinea()" /></div>
         </div>
@@ -3701,14 +3701,41 @@ function _pedRender() {
     '</tr>';
   }).join('');
 }
+// Busca un artículo por código exacto (también sin mayúsculas / sin 0 inicial) o por descripción exacta
+function _pedBuscarArt(v) {
+  v = String(v || '').trim();
+  if (!v) return null;
+  var lv = v.toLowerCase(), sin0 = lv.replace(/^0+/, '');
+  var L = db || [];
+  return L.find(function(a) { return String(a.cod).trim() === v; }) ||
+         L.find(function(a) { return String(a.cod).trim().toLowerCase() === lv; }) ||
+         L.find(function(a) { return String(a.cod).trim().toLowerCase().replace(/^0+/, '') === sin0; }) ||
+         L.find(function(a) { return String(a.desc || '').trim().toLowerCase() === lv; }) || null;
+}
+function _pedArtDesc() {
+  var d = document.getElementById('ped-art-desc');
+  if (!d) return;
+  var art = _pedBuscarArt(_val('ped-art'));
+  d.textContent = art ? '✓ ' + String(art.cod).trim() + ' · ' + (art.desc || '') : '';
+}
+// Enter en Artículo: código completo → lo selecciona y pasa a Cantidad
+function pedArtEnter() {
+  _pedAviso('');
+  var v = _val('ped-art').trim();
+  if (!v) return;
+  var art = _pedBuscarArt(v);
+  if (!art) { _pedAviso('No hay ningún artículo con el código ' + v + '.'); return; }
+  _setVal('ped-art', String(art.cod).trim());
+  _pedArtDesc();
+  var c = document.getElementById('ped-cant'); if (c) { c.focus(); c.select(); }
+}
 function pedAgregarLinea() {
   _pedAviso('');
   var v = _val('ped-art').trim();
   var cant = parseInt(_val('ped-cant'), 10);
   var hoja = parseInt(_val('ped-hoja'), 10) || '';
   if (!v) { _pedAviso('Elegí un artículo.'); return; }
-  var art = (db || []).find(function(a) { return String(a.cod).trim() === v; }) ||
-            (db || []).find(function(a) { return String(a.desc || '').trim().toLowerCase() === v.toLowerCase(); });
+  var art = _pedBuscarArt(v);
   if (!art) { _pedAviso('Artículo no encontrado: ' + v + '. Elegilo de la lista.'); return; }
   if (!(cant > 0)) { _pedAviso('Poné la cantidad.'); return; }
   var cod = String(art.cod).trim();
@@ -3716,7 +3743,7 @@ function pedAgregarLinea() {
   if (ya) { ya.cant = (ya.cant || 0) + cant; showToast('Se sumó a la línea de ' + cod + ': ' + ya.cant); }
   else _ped.lineas.push({ idLinea: '', cod: cod, desc: art.desc || '', cant: cant, hoja: hoja, estado: '', sacada: 0 });
   _ped.cambios = true;
-  _setVal('ped-art', ''); _setVal('ped-cant', '');
+  _setVal('ped-art', ''); _setVal('ped-cant', ''); _pedArtDesc();
   _pedRender();
   var inp = document.getElementById('ped-art'); if (inp) inp.focus();
 }
@@ -3739,7 +3766,7 @@ function pedQuitarLinea(i) {
 function pedNuevo() {
   if (_pedHayCambios() && !confirm('El pedido tiene cambios sin guardar. ¿Empezar uno nuevo igual?')) return;
   _ped = { id: '', idNuevo: '', lineas: [], cambios: false, busy: false };
-  ['ped-cliente', 'ped-nro', 'ped-hojas', 'ped-art', 'ped-cant', 'ped-hoja', 'ped-abrir-nro'].forEach(function(id) { _setVal(id, ''); });
+  ['ped-cliente', 'ped-nro', 'ped-hojas', 'ped-art', 'ped-cant', 'ped-hoja', 'ped-abrir-nro'].forEach(function(id) { _setVal(id, ''); }); _pedArtDesc();
   var nro = document.getElementById('ped-nro'); if (nro) nro.disabled = false;
   document.getElementById('ped-editando').textContent = '';
   _pedAviso('');
@@ -4157,7 +4184,7 @@ async function pcAbrir(n) {
   _pcMsg('Abriendo el pedido N° ' + x.nro + '…');
   try {
     _pc.parte = await _prGet('accion=pedidoControl&id=' + encodeURIComponent(x.idPedido) + '&operario=' + encodeURIComponent(x.operario));
-    _pc.rech = {}; _pc.val = {}; _pc.mot = {}; _pc.filas = {};
+    _pc.rech = {}; _pc.val = {}; _pc.mot = {}; _pc.filas = {}; _pc.ed = {};
     _pcMsg('');
   } catch (e) {
     _pcMsg('No se pudo abrir: ' + e.message, true);
@@ -4174,6 +4201,23 @@ function _pcLeerInputs() {
   document.querySelectorAll('.pc-ml').forEach(function(el) { var r = (_pc.filas[el.dataset.k] || [])[el.dataset.i]; if (r) r.lote = el.value.trim().toUpperCase(); });
   document.querySelectorAll('.pc-mf').forEach(function(el) { var r = (_pc.filas[el.dataset.k] || [])[el.dataset.i]; if (r) r.fecha = el.value.trim(); });
   document.querySelectorAll('.pc-mq').forEach(function(el) { var r = (_pc.filas[el.dataset.k] || [])[el.dataset.i]; if (r) r.cant = el.value; });
+  document.querySelectorAll('.pc-el').forEach(function(el) { var e = (_pc.ed || {})[el.dataset.l]; if (e) e.lote = el.value.trim().toUpperCase(); });
+  document.querySelectorAll('.pc-ef').forEach(function(el) { var e = (_pc.ed || {})[el.dataset.l]; if (e) e.fecha = el.value.trim(); });
+  document.querySelectorAll('.pc-eq').forEach(function(el) { var e = (_pc.ed || {})[el.dataset.l]; if (e) e.quien = el.value; });
+}
+// 20/11 EDITAR (re-etiquetado): lote nuevo opcional, fecha nueva obligatoria, quién lo hizo (lista de pedidos)
+function pcEditar(a) {
+  var l = _pc.parte && _pc.parte.lineas[a];
+  if (!l) return;
+  _pcLeerInputs();
+  if (!_pc.ed) _pc.ed = {};
+  if (_pc.ed[l.idLinea]) { delete _pc.ed[l.idLinea]; }
+  else {
+    var eds = _pc.parte.editores || [], yo = (CURRENT_USER && CURRENT_USER.name) || '';
+    var def = eds.filter(function(n) { return n.toLowerCase() === yo.toLowerCase(); })[0] || '';
+    _pc.ed[l.idLinea] = { lote: '', fecha: '', quien: def };
+  }
+  _pcRender();
 }
 // ── 18/11: filas DE MÁS (sacadas por encima del sistema): lote a mano + fecha obligatoria, sin tope ──
 // Fecha escrita → "MM/AAAA" ('' si no sirve). Acepta 4/26, 04/2026, 2026-04 (igual que el GAS).
@@ -4337,8 +4381,21 @@ function _pcParteHtml(p) {
       });
       html += '</div><div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">' +
         '<button class="btn btn-sm" onclick="pcRechazar(' + a + ')" style="color:#EF4444; border-color:#EF4444;">' + (rech ? '↺ Sí sirve' : '✖ Fecha no sirve') + '</button>' +
-        (rech ? '<input type="text" class="pc-mot" data-l="' + escHtml(l.idLinea) + '" value="' + escHtml(_pc.mot[l.idLinea] || '') + '" placeholder="Motivo (obligatorio): ej. vence muy pronto" style="flex:1; min-width:200px; padding:6px 10px;">' : '') +
+        (rech ? '<input type="text" class="pc-mot" data-l="' + escHtml(l.idLinea) + '" value="' + escHtml(_pc.mot[l.idLinea] || '') + '" placeholder="Motivo (obligatorio): ej. vence muy pronto" style="flex:1; min-width:200px; padding:6px 10px;">' :
+          '<button class="btn btn-sm" onclick="pcEditar(' + a + ')" style="color:#3B82F6; border-color:#3B82F6;">' + ((_pc.ed || {})[l.idLinea] ? '↺ No editar' : '✎ Editar (re-etiquetado)') + '</button>') +
         '</div>';
+      var E = !rech && (_pc.ed || {})[l.idLinea];
+      if (E) {
+        var dE = ' data-l="' + escHtml(l.idLinea) + '"';
+        html += '<div style="margin-top:8px; padding:10px 12px; border-radius:8px; border:1px solid #3B82F6; background:#3B82F611;">' +
+          '<div style="font-size:12px; font-weight:700; color:#3B82F6; margin-bottom:6px;">✎ Lo que se manda (re-etiquetado). En la planilla queda también el lote/fecha original.</div>' +
+          '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px;">' +
+            '<input type="text" class="pc-el"' + dE + ' value="' + escHtml(E.lote) + '" placeholder="Lote nuevo (vacío = queda el original)" style="flex:1; min-width:170px; padding:7px;">' +
+            '<input type="text" class="pc-ef"' + dE + ' value="' + escHtml(E.fecha) + '" placeholder="Vence MM/AAAA *" inputmode="numeric" style="width:130px; text-align:center; padding:7px;' + (E.fecha && !_pcFechaNorm(E.fecha) ? ' border-color:#EF4444;' : '') + '">' +
+            '<select class="pc-eq"' + dE + ' style="min-width:150px; padding:7px;"><option value="">— ¿quién re-etiquetó? —</option>' +
+              (_pc.parte.editores || []).map(function(n) { return '<option value="' + escHtml(n) + '"' + (E.quien === n ? ' selected' : '') + '>' + escHtml(n) + '</option>'; }).join('') +
+            '</select></div></div>';
+      }
     } else if (l.estado === 'CONTROLADA') {
       html += '<div style="font-size:12px; color:#10B981; margin-top:6px;">✓ ' + l.sacado.filter(function(s) { return s.estado === 'CONTROLADO'; }).map(function(s) {
         return s.cant + ' del lote ' + escHtml(s.lote) + ' (' + escHtml(s.fecha) + ') en ' + escHtml(s.ubicacion);
@@ -4356,7 +4413,7 @@ async function pcConfirmar() {
   var p = _pc.parte;
   if (!p || _pc.busy) return;
   _pcLeerInputs();
-  var lotes = [], rechazos = [];
+  var lotes = [], rechazos = [], ediciones = [];
   for (var a = 0; a < p.lineas.length; a++) {
     var l = p.lineas[a];
     if (l.estado !== 'PARA CONTROL') continue;
@@ -4400,13 +4457,20 @@ async function pcConfirmar() {
       if (suma !== s.cant) { _pcMsg('⚠ ' + l.cod + ' (' + s.ubicacion + '): los lotes suman ' + suma + ' y se sacaron ' + s.cant, true); return; }
       lotes.push({ idSacado: s.idSacado, partes: partes });
     }
+    var E = (_pc.ed || {})[l.idLinea];
+    if (E) {
+      var fE = _pcFechaNorm(E.fecha);
+      if (!fE) { _pcMsg('⚠ ' + l.cod + ' (editar): poné la fecha nueva (MM/AAAA)', true); return; }
+      if (!E.quien) { _pcMsg('⚠ ' + l.cod + ' (editar): elegí quién lo re-etiquetó', true); return; }
+      ediciones.push({ idLinea: l.idLinea, lote: E.lote || '', fecha: fE, editadoPor: E.quien });
+    }
   }
   _pc.busy = true;
   var btn = document.getElementById('pc-btn-ok');
   if (btn) btn.disabled = true;
   _pcMsg('Guardando el control…');
   try {
-    var r = await _prPost({ accion: 'controlarParte', idPedido: p.idPedido, operario: p.operario, usuario: (CURRENT_USER && CURRENT_USER.name) || '', lotes: lotes, rechazos: rechazos });
+    var r = await _prPost({ accion: 'controlarParte', idPedido: p.idPedido, operario: p.operario, usuario: (CURRENT_USER && CURRENT_USER.name) || '', lotes: lotes, rechazos: rechazos, ediciones: ediciones });
     showToast(r.ya ? 'Ese pedido ya estaba controlado' : '✅ N° ' + p.nro + ': ' + r.controladas + ' aprobado(s)' + (r.rechazadas ? ', ' + r.rechazadas + (p.operario ? ' devuelto(s) a ' + p.operario + ' para corregir' : ' quedan para reasignar') : ''));
     _pc.busy = false;
     await pcCargar();
