@@ -6667,8 +6667,19 @@ var incompletas = remito.filter(function(r){ return (r.unidadesControladas || 0)
           // Actualizar división específica si hay lote
           if (lineaRep.lote && lineaRep.lote !== '—' && lineaOrig.divisiones && lineaOrig.divisiones.length > 0) {
             var _upCjOr = parseInt(lineaOrig.unidadesPorCaja || lineaOrig.cantCaja || 1, 10) || 1;
-            var divOr = lineaOrig.divisiones.find(function(d){ return String(d.lote) === String(lineaRep.lote); });
-            if (divOr) { divOr.cajas = Math.max(0, (parseInt(divOr.cajas, 10) || 0) - Math.ceil(cantRestada / _upCjOr)); }
+            // 24/11: además de cajas, bajar unidades/cantReal del lote (si no, al re-guardar el palet el stock revive, caso P83).
+            // Lote comparado sin ceros a la izquierda; si hay varias divisiones del mismo lote, se reparte.
+            var _nlOr = function(x){ return String(x == null ? '' : x).trim().toUpperCase().replace(/^0+/, ''); };
+            var _restaDiv = cantRestada;
+            lineaOrig.divisiones.forEach(function(divOr) {
+              if (_restaDiv <= 0 || _nlOr(divOr.lote) !== _nlOr(lineaRep.lote)) return;
+              var _uD = (divOr.cantReal != null ? parseInt(divOr.cantReal, 10) : parseInt(divOr.unidades, 10)) || 0;
+              var _sacar = _uD > 0 ? Math.min(_restaDiv, _uD) : _restaDiv;
+              divOr.cajas = Math.max(0, (parseInt(divOr.cajas, 10) || 0) - Math.ceil(_sacar / _upCjOr));
+              if (divOr.unidades != null) divOr.unidades = Math.max(0, (parseInt(divOr.unidades, 10) || 0) - _sacar);
+              if (divOr.cantReal != null) divOr.cantReal = Math.max(0, (parseInt(divOr.cantReal, 10) || 0) - _sacar);
+              _restaDiv -= _sacar;
+            });
           }
         });
         ocOrig.savedAt = new Date().toISOString();
