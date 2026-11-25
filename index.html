@@ -4828,10 +4828,22 @@ function peQuitarSobra() {
   _peAviso('✅ Listo. Tocá "Confirmar y continuar"', 'ok');
   peRender();
 }
+// 24/11 (Pedro): al confirmar cada ubicación se manda lo sacado hasta ahora (soloGuardar) en segundo plano,
+// así la ubicación baja en STOCK POR UBICACION (col E) y los de afuera lo ven. De a un envío por vez; si falla, va en el próximo o en "Terminé de sacar".
+var _peSyncVuelo = false, _peSyncOtra = false;
+function _peSync() {
+  if (!_pe.datos || !_pe.loc || _pe.busy) return;
+  if (_peSyncVuelo) { _peSyncOtra = true; return; }
+  _peSyncVuelo = true; _peSyncOtra = false;
+  _prPost({ accion: 'registrarSacado', soloGuardar: true, idPedido: _pe.datos.idPedido, tomas: _peTomasLista(_pe.loc.tomas), faltantes: [], deMas: _peExtras().deMas, usuario: (CURRENT_USER && CURRENT_USER.name) || '' })
+    .catch(function() {})
+    .then(function() { _peSyncVuelo = false; if (_peSyncOtra) _peSync(); });
+}
 function peContinuar() {
   var p = _pe.loc && _pe.loc.paso;
   if (!p || p.hechas !== p.objetivo) return;
   _peAvanzar();
+  _peSync();
   _peAviso('Escaneá la próxima ubicación');
   peRender();
 }
@@ -4843,6 +4855,7 @@ function peIrReserva(falta) {
   if (c.indexOf(p.codigo) === -1) c.push(p.codigo);
   var idl = p.idLinea;
   _peAvanzar();
+  _peSync();
   if (falta) _pe.faltaAbierta = idl;
   _peAviso(falta ? 'Marcá la falta abajo' : 'Escaneá la reserva marcada con ▶');
   peRender();
@@ -5007,6 +5020,7 @@ function peBorrarLinea(idl) {
   if (_pe.loc.cerr) delete _pe.loc.cerr[idl];
   if (!_pe.loc.paso || _pe.loc.paso.idLinea === idl) _peAvanzar();
   else _peGuardar();
+  _peSync(); // 24/11: devuelve a la ubicación lo que ya se había mandado de este artículo
   _peAviso('');
   peRender();
 }
