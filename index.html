@@ -4011,7 +4011,9 @@ function _prDetalleHtml(det) {
       '<td style="text-align:center;">' + l.pedida + '</td>' +
       '<td style="font-size:12px;">' + escHtml(l.estado) + (asig || l.estado === 'ANULADA' ? '' : ' 🔒') +
         // 16/11: avance para que Matías vea qué está completo y qué quedó a la mitad
-        ((l.estado === 'PARA CONTROL' || l.estado === 'CONTROLADA') ? '<div style="color:#10B981; font-weight:700;">✓ sacado ' + l.sacada + '/' + l.pedida + '</div>' :
+        // 25/11: EMBALADA también es "terminado" (antes caía en "a la mitad")
+        (l.estado === 'EMBALADA' ? '<div style="color:#10B981; font-weight:700;">📦 embalado ' + l.sacada + '/' + l.pedida + '</div>' :
+        (l.estado === 'PARA CONTROL' || l.estado === 'CONTROLADA') ? '<div style="color:#10B981; font-weight:700;">✓ sacado ' + l.sacada + '/' + l.pedida + '</div>' :
           (l.sacada > 0 ? '<div style="color:#F59E0B; font-weight:700;">a la mitad: ' + l.sacada + '/' + l.pedida + '</div>' : '')) + '</td>' +
       '<td style="font-size:12px;">' + escHtml(l.operario || '—') + '</td></tr>';
   }).join('');
