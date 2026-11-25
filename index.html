@@ -4630,7 +4630,7 @@ async function mpDevolver(id) {
 // Pedro: "Caja 1, 2…"; en cada caja escanea lo que mete (EAN suelto, 1 DUN o varios DUN) y la cierra con "Cerrar caja".
 // El lote no importa por caja: lo reparte el GAS. Lecturas: 1 al abrir (pedidoCajas). Escanear = 0 ejecuciones
 // (la caja abierta queda en BETA_caja_<usuario>). Cerrar caja = 1 POST (devuelve los datos nuevos, sin otra lectura).
-var _mc = { datos: null, caja: null, busy: false, aviso: null };
+var _mc = { datos: null, caja: null, busy: false, aviso: null, alerta: null };
 function _mcKey() { return 'BETA_caja_' + ((CURRENT_USER && CURRENT_USER.name) || ''); }
 function _mcGuardar() { try { localStorage.setItem(_mcKey(), JSON.stringify(_mc.caja)); } catch (e) {} }
 function _mcLocal() { try { return JSON.parse(localStorage.getItem(_mcKey()) || 'null'); } catch (e) { return null; } }
@@ -4666,20 +4666,50 @@ async function mcAbrir(id) {
   _mc.aviso = { m: 'Escaneá lo que ponés en la caja', tipo: '' };
   mpRender();
 }
-function mcVolver() { _mc.datos = null; _mc.aviso = null; _mpMsg(''); mpRender(); }
+function mcVolver() { _mc.datos = null; _mc.aviso = null; _mc.alerta = null; _mpMsg(''); mpRender(); }
+// 25/11 Pedro: los avisos tienen que ser grandes. Cartel en pantalla completa, con vibración; mientras está, no se escanea.
+function _mcAlerta(tipo, tit, html, botones) {
+  _mc.alerta = { tipo: tipo, tit: tit, html: html, botones: botones };
+  try { if (navigator.vibrate) navigator.vibrate(tipo === 'err' ? [300, 100, 300] : 200); } catch (e) {}
+  mpRender();
+}
+function _mcAlertaCerrar() { _mc.alerta = null; mpRender(); }
+function _mcAlertaHtml() {
+  var a = _mc.alerta; if (!a) return '';
+  var c = a.tipo === 'err' ? '#EF4444' : '#F59E0B';
+  return '<div style="position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,.75); display:flex; align-items:center; justify-content:center; padding:16px;">' +
+    '<div style="background:var(--c-surface, #161b22); border:4px solid ' + c + '; border-radius:16px; padding:22px; max-width:520px; width:100%; text-align:center;">' +
+      '<div style="font-size:34px; font-weight:900; color:' + c + ';">' + a.tit + '</div>' +
+      '<div style="font-size:19px; margin-top:12px; line-height:1.4; color:var(--c-text);">' + a.html + '</div>' +
+      a.botones.map(function(b, i) {
+        return '<button class="btn" onclick="' + b.f + '" style="width:100%; margin-top:' + (i ? 8 : 18) + 'px; padding:16px; font-size:18px; font-weight:800;' + (i ? '' : ' background:' + c + '; color:#fff; border:none;') + '">' + b.t + '</button>';
+      }).join('') +
+    '</div></div>';
+}
 function mcScan(raw) {
   raw = String(raw || '').trim();
-  if (!raw || !_mc.datos || _mc.busy) return;
+  if (!raw || !_mc.datos || _mc.busy || _mc.alerta) return;
   var art = db.find(function(a) { return String(a.cbCaja).trim() === raw || String(a.cbSuelto).trim() === raw || String(a.cod).trim() === raw; });
   if (!art) { _mc.aviso = { m: '⛔ Código no encontrado: ' + raw, tipo: 'err' }; mpRender(); return; }
   var cod = String(art.cod).trim();
   var lins = _mc.datos.lineas.filter(function(l) { return l.cod === cod; });
-  if (!lins.length) { _mc.aviso = { m: '⛔ ' + (art.desc || cod) + ' no está para embalar en este pedido', tipo: 'err' }; mpRender(); return; }
+  if (!lins.length) {
+    _mc.aviso = { m: '⛔ ' + (art.desc || cod) + ' no está para embalar en este pedido', tipo: 'err' };
+    _mcAlerta('err', '⛔ NO ES DE ESTE PEDIDO', escHtml(cod) + ' ' + escHtml(art.desc || '') + '<br><br><b>NO lo pongas en la caja.</b>', [{ t: 'Entendido', f: '_mcAlertaCerrar()' }]);
+    return;
+  }
   var esCaja = !!art.cbCaja && String(art.cbCaja).trim() === raw;
   var n = esCaja ? (parseInt(art.cantCaja, 10) || 0) : (parseInt(art.unidSuelto, 10) || 1);
   if (!n) { _mc.aviso = { m: '⛔ La caja (DUN) no tiene unidades cargadas en Artículos', tipo: 'err' }; mpRender(); return; }
   var libre = lins.reduce(function(s, l) { return s + l.pendiente - _mcEnCaja(l.idLinea); }, 0);
-  if (n > libre) { _mc.aviso = { m: '⛔ Te pasaste: de ' + cod + ' quedan ' + libre + ' para embalar y escaneaste ' + n + '. No lo pongas en la caja', tipo: 'err' }; mpRender(); return; }
+  if (n > libre) {
+    var pide = lins.reduce(function(s, l) { return s + l.pendiente; }, 0), ya = pide - libre;
+    _mc.aviso = { m: '⛔ Te pasaste con ' + cod + '. No lo pongas en la caja', tipo: 'err' };
+    _mcAlerta('err', '⛔ TE PASASTE', escHtml(cod) + ' ' + escHtml(art.desc || '') +
+      '<br>Falta embalar: <b>' + pide + '</b> · ya en la caja: <b>' + ya + '</b><br>Escaneaste <b>' + n + '</b>' + (esCaja ? ' (DUN)' : '') +
+      '<br><br><b>NO lo pongas en la caja.</b>', [{ t: 'Entendido', f: '_mcAlertaCerrar()' }]);
+    return;
+  }
   var resta = n;
   lins.forEach(function(l) {
     var lugar = l.pendiente - _mcEnCaja(l.idLinea), x = Math.min(lugar, resta);
@@ -4696,11 +4726,21 @@ function mcQuitar(cod) {
   _mc.aviso = { m: cod + ' sacado de la caja', tipo: '' };
   mpRender();
 }
-async function mcCerrar() {
+async function mcCerrar(igual) {
   if (_mc.busy || !_mc.datos || !_mc.caja) return;
+  _mc.alerta = null;
   var items = Object.keys(_mc.caja.items).filter(function(k) { return _mc.caja.items[k] > 0; })
     .map(function(k) { return { idLinea: k, cant: _mc.caja.items[k] }; });
   if (!items.length) { _mc.aviso = { m: '⛔ La caja está vacía', tipo: 'err' }; mpRender(); return; }
+  // 25/11: si queda algo sin embalar, cartel grande. Solo cierra si el operario confirma que sigue en otra caja.
+  var faltan = _mc.datos.lineas.map(function(l) { return { cod: l.cod, q: l.pendiente - _mcEnCaja(l.idLinea) }; }).filter(function(x) { return x.q > 0; });
+  if (faltan.length && !igual) {
+    var tot = faltan.reduce(function(s, x) { return s + x.q; }, 0);
+    _mcAlerta('warn', '⚠️ FALTAN ' + tot + ' UNIDADES', faltan.map(function(x) { return '<b>' + escHtml(x.cod) + '</b>: faltan ' + x.q; }).join('<br>') +
+      '<br><br>¿Lo que falta va en la Caja ' + (Number(_mc.datos.proxima) + 1) + '?',
+      [{ t: 'Volver y seguir escaneando', f: '_mcAlertaCerrar()' }, { t: 'Sí, va en otra caja: cerrar Caja ' + _mc.datos.proxima, f: 'mcCerrar(true)' }]);
+    return;
+  }
   _mc.busy = true;
   _mc.aviso = { m: 'Cerrando la caja…', tipo: '' };
   mpRender();
@@ -4757,7 +4797,7 @@ function _mcHtml() {
     '<button class="btn" onclick="mcCerrar()"' + (vacia || _mc.busy ? ' disabled' : '') + ' style="width:100%; margin-top:10px; padding:14px; font-size:16px; font-weight:800; background:#10B981; color:#fff; border:none;' + (vacia || _mc.busy ? ' opacity:0.5;' : '') + '">Cerrar caja ' + d.proxima + '</button>' +
     '<div style="margin-top:14px;"><div style="font-size:11px; font-weight:700; color:var(--c-text3); letter-spacing:.06em; margin-bottom:4px;">FALTA EMBALAR</div>' + falta + '</div>' +
     (cerradas ? '<div style="margin-top:12px;"><div style="font-size:11px; font-weight:700; color:var(--c-text3); letter-spacing:.06em; margin-bottom:4px;">CAJAS CERRADAS</div>' + cerradas + '</div>' : '') +
-  '</div>';
+  '</div>' + _mcAlertaHtml();
 }
 
 // ── ESCANEO DE PEDIDOS: sacar (etapa 10, 12/11) ──
