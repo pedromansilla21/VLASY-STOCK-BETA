@@ -4532,6 +4532,7 @@ function _mpActiva() {
 }
 function mpRender() {
   var el = document.getElementById('mp-lista');
+  if (el && _mc.datos) { el.innerHTML = _mcHtml(); setTimeout(function() { var i = document.getElementById('mc-scan'); if (i) i.focus(); }, 50); return; }
   if (!el || !_mp.datos) return;
   var partes = _mp.datos.partes || [];
   if (!partes.length) {
@@ -4546,7 +4547,7 @@ function mpRender() {
     var activa = p.idPedido === idAct;
     var boton;
     if (p.estado === 'PARA CONTROL') boton = '<div style="font-size:14px; font-weight:600; color:#A855F7;">⏳ Esperando que Matías controle las fechas — mientras, podés seguir con otro pedido</div>';
-    else if (p.estado === 'LISTO CAJAS') boton = '<div style="font-size:14px; font-weight:600; color:#10B981;">📦 Listo para armar cajas (todavía no disponible) — podés seguir con otro pedido</div>';
+    else if (p.estado === 'LISTO CAJAS') boton = '<button class="btn" style="background:#10B981; color:#fff; border:none; font-weight:700;" onclick="mcAbrir(\'' + escHtml(p.idPedido) + '\')"><i class="ti ti-package"></i> Armar cajas</button>';
     else if (!activa) boton = '<div style="font-size:13px; color:var(--c-text3);">🔒 Primero terminá de sacar el N° ' + escHtml(primero ? primero.nro : '') + '</div>';
     else if (p.estado === 'ASIGNADA') boton = '<button class="btn btn-primary" onclick="mpEmpezar(\'' + escHtml(p.idPedido) + '\')"><i class="ti ti-player-play"></i> Empezar</button>';
     else boton = '<button class="btn btn-primary" onclick="switchPanel(\'ped-escaneo\')"><i class="ti ti-barcode"></i> ' + (p.estado === 'CORREGIR' ? 'Corregir' : 'Seguir sacando') + '</button>';
@@ -4621,6 +4622,140 @@ async function mpDevolver(id) {
   } finally {
     _mp.busy = false;
   }
+}
+
+// ── ARMAR CAJAS (etapa 13, 25/11) ──
+// Pedro: "Caja 1, 2…"; en cada caja escanea lo que mete (EAN suelto, 1 DUN o varios DUN) y la cierra con "Cerrar caja".
+// El lote no importa por caja: lo reparte el GAS. Lecturas: 1 al abrir (pedidoCajas). Escanear = 0 ejecuciones
+// (la caja abierta queda en BETA_caja_<usuario>). Cerrar caja = 1 POST (devuelve los datos nuevos, sin otra lectura).
+var _mc = { datos: null, caja: null, busy: false, aviso: null };
+function _mcKey() { return 'BETA_caja_' + ((CURRENT_USER && CURRENT_USER.name) || ''); }
+function _mcGuardar() { try { localStorage.setItem(_mcKey(), JSON.stringify(_mc.caja)); } catch (e) {} }
+function _mcLocal() { try { return JSON.parse(localStorage.getItem(_mcKey()) || 'null'); } catch (e) { return null; } }
+function _mcNueva() { return { id: _mc.datos.idPedido, idCaja: _mc.datos.idPedido + '|C|' + Date.now(), items: {} }; }
+function _mcEnCaja(idl) { return (_mc.caja && _mc.caja.items[idl]) || 0; }
+// Lo que está en la caja abierta tiene que seguir pendiente (si otra tablet lo embaló, se ajusta)
+function _mcAjustar() {
+  var vivas = {};
+  _mc.datos.lineas.forEach(function(l) { vivas[l.idLinea] = l.pendiente; });
+  Object.keys(_mc.caja.items).forEach(function(k) {
+    if (!vivas[k]) delete _mc.caja.items[k];
+    else if (_mc.caja.items[k] > vivas[k]) _mc.caja.items[k] = vivas[k];
+  });
+}
+async function mcAbrir(id) {
+  if (_mc.busy || !CURRENT_USER) return;
+  _mc.busy = true;
+  _mpMsg('Abriendo el pedido para armar cajas…');
+  try {
+    _mc.datos = await _prGet('accion=pedidoCajas&id=' + encodeURIComponent(id) + '&usuario=' + encodeURIComponent(CURRENT_USER.name || ''));
+    _mpMsg('');
+  } catch (e) {
+    _mc.datos = null;
+    _mpMsg('No se pudo abrir: ' + e.message, true);
+    return;
+  } finally {
+    _mc.busy = false;
+  }
+  var loc = _mcLocal();
+  _mc.caja = (loc && loc.id === id && loc.items) ? loc : _mcNueva();
+  _mcAjustar();
+  _mcGuardar();
+  _mc.aviso = { m: 'Escaneá lo que ponés en la caja', tipo: '' };
+  mpRender();
+}
+function mcVolver() { _mc.datos = null; _mc.aviso = null; _mpMsg(''); mpRender(); }
+function mcScan(raw) {
+  raw = String(raw || '').trim();
+  if (!raw || !_mc.datos || _mc.busy) return;
+  var art = db.find(function(a) { return String(a.cbCaja).trim() === raw || String(a.cbSuelto).trim() === raw || String(a.cod).trim() === raw; });
+  if (!art) { _mc.aviso = { m: '⛔ Código no encontrado: ' + raw, tipo: 'err' }; mpRender(); return; }
+  var cod = String(art.cod).trim();
+  var lins = _mc.datos.lineas.filter(function(l) { return l.cod === cod; });
+  if (!lins.length) { _mc.aviso = { m: '⛔ ' + (art.desc || cod) + ' no está para embalar en este pedido', tipo: 'err' }; mpRender(); return; }
+  var esCaja = !!art.cbCaja && String(art.cbCaja).trim() === raw;
+  var n = esCaja ? (parseInt(art.cantCaja, 10) || 0) : (parseInt(art.unidSuelto, 10) || 1);
+  if (!n) { _mc.aviso = { m: '⛔ La caja (DUN) no tiene unidades cargadas en Artículos', tipo: 'err' }; mpRender(); return; }
+  var libre = lins.reduce(function(s, l) { return s + l.pendiente - _mcEnCaja(l.idLinea); }, 0);
+  if (n > libre) { _mc.aviso = { m: '⛔ Te pasaste: de ' + cod + ' quedan ' + libre + ' para embalar y escaneaste ' + n + '. No lo pongas en la caja', tipo: 'err' }; mpRender(); return; }
+  var resta = n;
+  lins.forEach(function(l) {
+    var lugar = l.pendiente - _mcEnCaja(l.idLinea), x = Math.min(lugar, resta);
+    if (x > 0) { _mc.caja.items[l.idLinea] = _mcEnCaja(l.idLinea) + x; resta -= x; }
+  });
+  _mcGuardar();
+  _mc.aviso = { m: '✓ +' + n + ' ' + cod + (esCaja ? ' (caja cerrada)' : ''), tipo: 'ok' };
+  mpRender();
+}
+function mcQuitar(cod) {
+  if (!confirm('¿Sacar ' + cod + ' de esta caja? (sacalo también de la caja física)')) return;
+  _mc.datos.lineas.forEach(function(l) { if (l.cod === cod) delete _mc.caja.items[l.idLinea]; });
+  _mcGuardar();
+  _mc.aviso = { m: cod + ' sacado de la caja', tipo: '' };
+  mpRender();
+}
+async function mcCerrar() {
+  if (_mc.busy || !_mc.datos || !_mc.caja) return;
+  var items = Object.keys(_mc.caja.items).filter(function(k) { return _mc.caja.items[k] > 0; })
+    .map(function(k) { return { idLinea: k, cant: _mc.caja.items[k] }; });
+  if (!items.length) { _mc.aviso = { m: '⛔ La caja está vacía', tipo: 'err' }; mpRender(); return; }
+  _mc.busy = true;
+  _mc.aviso = { m: 'Cerrando la caja…', tipo: '' };
+  mpRender();
+  try {
+    var r = await _prPost({ accion: 'cerrarCaja', idPedido: _mc.datos.idPedido, idCaja: _mc.caja.idCaja, items: items, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
+    _mc.datos = r.datos;
+    _mc.caja = _mcNueva();
+    _mcGuardar();
+    if (r.completo || !_mc.datos.lineas.some(function(l) { return l.pendiente > 0; })) {
+      try { localStorage.removeItem(_mcKey()); } catch (e) {}
+      _mc.datos = null; _mc.aviso = null; _mc.busy = false;
+      showToast('✅ Caja ' + r.nroCaja + ' cerrada. ' + (r.completo ? 'Pedido embalado completo' : 'Tu parte está embalada'));
+      await mpCargar();
+      return;
+    }
+    _mc.aviso = { m: '✅ Caja ' + r.nroCaja + ' cerrada. Seguí con la Caja ' + _mc.datos.proxima, tipo: 'ok' };
+  } catch (e) {
+    _mc.aviso = { m: 'No se cerró: ' + e.message + '. Lo de la caja sigue guardado en la tablet.', tipo: 'err' };
+  } finally {
+    _mc.busy = false;
+    if (_mc.datos) mpRender();
+  }
+}
+function _mcHtml() {
+  var d = _mc.datos, items = _mc.caja.items;
+  var col = _mc.aviso && _mc.aviso.tipo === 'err' ? '#EF4444' : _mc.aviso && _mc.aviso.tipo === 'ok' ? '#10B981' : 'var(--c-text2)';
+  var enCaja = {};
+  d.lineas.forEach(function(l) { if (items[l.idLinea]) { var e = enCaja[l.cod] || (enCaja[l.cod] = { desc: l.desc, cant: 0 }); e.cant += items[l.idLinea]; } });
+  var codsCaja = Object.keys(enCaja);
+  var contenido = codsCaja.length ? codsCaja.map(function(c) {
+    return '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--c-border);">' +
+      '<div><span class="mono" style="font-weight:700;">' + escHtml(c) + '</span> <span style="font-size:13px;">' + escHtml(enCaja[c].desc) + '</span></div>' +
+      '<div style="display:flex; gap:8px; align-items:center;"><span style="font-size:18px; font-weight:800;">' + enCaja[c].cant + '</span>' +
+      '<button class="btn btn-sm" title="Sacar de la caja" onclick="mcQuitar(\'' + escHtml(c) + '\')">↺</button></div></div>';
+  }).join('') : '<div style="font-size:13px; color:var(--c-text3);">Vacía. Escaneá lo que ponés adentro.</div>';
+  var falta = d.lineas.map(function(l) {
+    var q = l.pendiente - _mcEnCaja(l.idLinea);
+    return '<div style="display:flex; justify-content:space-between; gap:8px; padding:5px 0;' + (q ? '' : ' opacity:0.5;') + '">' +
+      '<div><span class="mono" style="font-weight:700;">' + escHtml(l.cod) + '</span> <span style="font-size:13px;">' + escHtml(l.desc) + '</span></div>' +
+      '<span style="font-weight:800;' + (q ? '' : ' color:#10B981;') + '">' + (q ? q : '✅') + '<span style="font-size:12px; opacity:.6;"> / ' + l.aprobada + '</span></span></div>';
+  }).join('');
+  var cerradas = (d.cajas || []).map(function(c) {
+    return '<div style="font-size:12px; color:var(--c-text3);">Caja ' + c.nro + ': ' + c.items.map(function(x) { return escHtml(x.cod) + ' ×' + x.cant; }).join(', ') + (c.armadoPor ? ' · ' + escHtml(c.armadoPor) : '') + '</div>';
+  }).join('');
+  var vacia = !codsCaja.length;
+  return '<div class="card" style="padding:14px 16px; border-left:4px solid #10B981;">' +
+    '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">' +
+      '<div><span style="font-weight:800; font-size:16px; color:#C084FC;">N° ' + escHtml(d.nro) + '</span> <span style="font-weight:600;">' + escHtml(d.cliente) + '</span></div>' +
+      '<button class="btn btn-sm" onclick="mcVolver()"><i class="ti ti-arrow-left"></i> Volver</button></div>' +
+    '<div style="font-size:28px; font-weight:800; color:#10B981; margin-top:10px;">📦 CAJA ' + d.proxima + '</div>' +
+    '<input id="mc-scan" inputmode="none" autocomplete="off" placeholder="Esperando escaneo..." onkeydown="if(event.key===\'Enter\'){ var v=this.value; this.value=\'\'; event.preventDefault(); mcScan(v); }" style="width:100%; margin-top:10px; padding:12px; font-size:15px; font-family:monospace; border-radius:10px; border:2px solid var(--c-text2); background:var(--c-bg, #0d1117); color:var(--c-text);" />' +
+    '<div style="margin-top:8px; font-size:14px; font-weight:700; color:' + col + ';">' + escHtml(_mc.aviso ? _mc.aviso.m : '') + '</div>' +
+    '<div style="background:var(--c-surface2); border-radius:10px; padding:12px; margin-top:10px;"><div style="font-size:11px; font-weight:700; color:var(--c-text3); letter-spacing:.06em; margin-bottom:4px;">EN ESTA CAJA</div>' + contenido + '</div>' +
+    '<button class="btn" onclick="mcCerrar()"' + (vacia || _mc.busy ? ' disabled' : '') + ' style="width:100%; margin-top:10px; padding:14px; font-size:16px; font-weight:800; background:#10B981; color:#fff; border:none;' + (vacia || _mc.busy ? ' opacity:0.5;' : '') + '">Cerrar caja ' + d.proxima + '</button>' +
+    '<div style="margin-top:14px;"><div style="font-size:11px; font-weight:700; color:var(--c-text3); letter-spacing:.06em; margin-bottom:4px;">FALTA EMBALAR</div>' + falta + '</div>' +
+    (cerradas ? '<div style="margin-top:12px;"><div style="font-size:11px; font-weight:700; color:var(--c-text3); letter-spacing:.06em; margin-bottom:4px;">CAJAS CERRADAS</div>' + cerradas + '</div>' : '') +
+  '</div>';
 }
 
 // ── ESCANEO DE PEDIDOS: sacar (etapa 10, 12/11) ──
