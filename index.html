@@ -3847,10 +3847,31 @@ async function _prGet(q) {
   return r.data;
 }
 async function _prPost(body) {
-  var r = await (await fetch(GAS_URL, { method: 'POST', body: JSON.stringify(body) })).json();
+  var r;
+  // 26/11 (cambio 2): sin red / respuesta rota → e.red = true (aviso gris); error del GAS → e.red = false (cartel grande)
+  try { r = await (await fetch(GAS_URL, { method: 'POST', body: JSON.stringify(body) })).json(); }
+  catch (eF) { eF.red = true; throw eF; }
   if (!r.ok) throw new Error(r.error || 'error');
   return r.data;
 }
+// 26/11 (cambio 2): cartel grande genérico en pantalla completa (vibra). botones: [{t: texto, f: 'código onclick'}]
+// Cada botón cierra el cartel antes de correr su código.
+function _alertaGrande(tipo, tit, html, botones) {
+  var c = tipo === 'err' ? '#EF4444' : tipo === 'ok' ? '#10B981' : '#F59E0B';
+  var el = document.getElementById('alerta-grande');
+  if (!el) { el = document.createElement('div'); el.id = 'alerta-grande'; document.body.appendChild(el); }
+  botones = botones && botones.length ? botones : [{ t: 'Entendido', f: '' }];
+  el.innerHTML = '<div style="position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,.75); display:flex; align-items:center; justify-content:center; padding:16px;">' +
+    '<div style="background:var(--c-surface, #161b22); border:4px solid ' + c + '; border-radius:16px; padding:22px; max-width:520px; width:100%; text-align:center;">' +
+      '<div style="font-size:30px; font-weight:900; color:' + c + ';">' + tit + '</div>' +
+      '<div style="font-size:18px; margin-top:12px; line-height:1.4; color:var(--c-text);">' + html + '</div>' +
+      botones.map(function(b, i) {
+        return '<button class="btn" onclick="_alertaGrandeCerrar();' + (b.f || '') + '" style="width:100%; margin-top:' + (i ? 8 : 18) + 'px; padding:16px; font-size:18px; font-weight:800;' + (i ? '' : ' background:' + c + '; color:#fff; border:none;') + '">' + b.t + '</button>';
+      }).join('') +
+    '</div></div>';
+  try { if (navigator.vibrate) navigator.vibrate(tipo === 'err' ? [300, 100, 300] : 200); } catch (e) {}
+}
+function _alertaGrandeCerrar() { var el = document.getElementById('alerta-grande'); if (el) el.innerHTML = ''; }
 function _prMsg(m, err) {
   var el = document.getElementById('pr-msg');
   if (!el) return;
@@ -4603,6 +4624,10 @@ async function mpDevolver(id) {
   var mot = _val('mp-dev-mot');
   if (mot === 'Otro') mot = (_val('mp-dev-otro') || '').trim();
   if (!mot) { showToast('⚠ Elegí o escribí el motivo'); return; }
+  // 26/11 (cambio 10, H18): caja abierta de este pedido sin cerrar → avisar; al devolver se borra de la tablet
+  var cajaL = _mcLocal(), cajaN = (cajaL && cajaL.id === id) ? _mcUnid(cajaL) : 0;
+  if (cajaN > 0 && !confirm('Tenés una caja SIN CERRAR de este pedido con ' + cajaN + ' unidades.' + (cajaL.intento ? '\n(Puede que ya se haya grabado.)' : '') +
+    '\n\nAl devolver esa caja se borra de la tablet: SACÁ la mercadería de la caja física y dejala para el que siga.\n\n¿Devolver igual?')) return;
   _mp.busy = true;
   showToast('Devolviendo…');
   try {
@@ -4617,6 +4642,7 @@ async function mpDevolver(id) {
     var rd = await _prPost({ accion: 'devolverParte', idPedido: id, motivo: mot, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
     _mp.devAbierto = '';
     if (loc && loc.id === id) _peBorrarLocal();
+    if (cajaL && cajaL.id === id) { try { localStorage.removeItem(_mcKey()); } catch (eC) {} }
     showToast('✅ Pedido devuelto a Matías' + (rd && rd.completas ? ' (' + rd.completas + ' artículo(s) ya sacado(s) quedan como completos)' : ''));
     await mpCargar();
   } catch (e) {
@@ -4634,7 +4660,15 @@ var _mc = { datos: null, caja: null, busy: false, aviso: null, alerta: null };
 function _mcKey() { return 'BETA_caja_' + ((CURRENT_USER && CURRENT_USER.name) || ''); }
 function _mcGuardar() { try { localStorage.setItem(_mcKey(), JSON.stringify(_mc.caja)); } catch (e) {} }
 function _mcLocal() { try { return JSON.parse(localStorage.getItem(_mcKey()) || 'null'); } catch (e) { return null; } }
-function _mcNueva() { return { id: _mc.datos.idPedido, idCaja: _mc.datos.idPedido + '|C|' + Date.now(), items: {} }; }
+function _mcNueva() { return { id: _mc.datos.idPedido, nro: _mc.datos.nro, idCaja: _mc.datos.idPedido + '|C|' + Date.now(), items: {} }; }
+function _mcUnid(c) { return c && c.items ? Object.keys(c.items).reduce(function(s, k) { return s + (c.items[k] || 0); }, 0) : 0; }
+// 26/11 (cambio 10, H7): "Cerrar caja" falló → puede haberse grabado igual. Hasta re-cerrarla no se agrega ni se saca nada
+// (si cambia el contenido, el GAS respondería "ya" con lo viejo y lo nuevo quedaría sin registrar).
+function _mcTrabada() {
+  if (!_mc.caja || !_mc.caja.intento) return false;
+  _mcAlerta('err', '⛔ PRIMERO CERRÁ LA CAJA', 'La última vez "Cerrar caja" no confirmó (puede que se haya grabado).<br><br>Tocá <b>Cerrar caja</b> de nuevo <b>sin agregar ni sacar nada</b>.', [{ t: 'Entendido', f: '_mcAlertaCerrar()' }]);
+  return true;
+}
 function _mcEnCaja(idl) { return (_mc.caja && _mc.caja.items[idl]) || 0; }
 // Lo que está en la caja abierta tiene que seguir pendiente (si otra tablet lo embaló, se ajusta)
 function _mcAjustar() {
@@ -4660,10 +4694,22 @@ async function mcAbrir(id) {
     _mc.busy = false;
   }
   var loc = _mcLocal();
-  _mc.caja = (loc && loc.id === id && loc.items) ? loc : _mcNueva();
-  _mcAjustar();
-  _mcGuardar();
+  var mismo = loc && loc.id === id && loc.items;
+  _mc.caja = mismo ? loc : _mcNueva();
   _mc.aviso = { m: 'Escaneá lo que ponés en la caja', tipo: '' };
+  // 26/11 (cambio 10, H18): había una caja abierta de OTRO pedido con mercadería → avisar antes de borrarla
+  if (!mismo && _mcUnid(loc) > 0) {
+    _mc.alerta = null;
+    _mcAlerta('warn', '⚠️ CAJA ABIERTA DE OTRO PEDIDO', 'Tenés una caja sin cerrar del pedido <b>' + escHtml(loc.nro ? 'N° ' + loc.nro : loc.id) + '</b> con <b>' + _mcUnid(loc) + '</b> unidades.' +
+      (loc.intento ? '<br><b>Esa caja quizás ya se grabó.</b>' : '') + '<br><br>Si seguís, esa caja se borra de la tablet.',
+      [{ t: 'Volver (no borrar)', f: 'mcVolver()' }, { t: 'Borrar esa caja y seguir', f: '_mcGuardar(); _mcAlertaCerrar()' }]);
+    return;
+  }
+  if (!mismo) _mc.caja = _mcNueva();
+  // con intento pendiente NO se ajusta: si se grabó, lo pendiente ya bajó y se vaciaría la caja que hay que re-cerrar
+  if (!_mc.caja.intento) _mcAjustar();
+  _mcGuardar();
+  if (_mc.caja.intento) _mc.aviso = { m: '⚠ La caja ' + (_mc.caja.nroMostrado || '') + ' no confirmó al cerrar: tocá "Cerrar caja" de nuevo sin cambiar nada', tipo: 'err' };
   mpRender();
 }
 function mcVolver() { _mc.datos = null; _mc.aviso = null; _mc.alerta = null; _mpMsg(''); mpRender(); }
@@ -4689,6 +4735,7 @@ function _mcAlertaHtml() {
 function mcScan(raw) {
   raw = String(raw || '').trim();
   if (!raw || !_mc.datos || _mc.busy || _mc.alerta) return;
+  if (_mcTrabada()) return;
   var art = db.find(function(a) { return String(a.cbCaja).trim() === raw || String(a.cbSuelto).trim() === raw || String(a.cod).trim() === raw; });
   if (!art) { _mc.aviso = { m: '⛔ Código no encontrado: ' + raw, tipo: 'err' }; mpRender(); return; }
   var cod = String(art.cod).trim();
@@ -4720,6 +4767,7 @@ function mcScan(raw) {
   mpRender();
 }
 function mcQuitar(cod) {
+  if (_mcTrabada()) return;
   if (!confirm('¿Sacar ' + cod + ' de esta caja? (sacalo también de la caja física)')) return;
   _mc.datos.lineas.forEach(function(l) { if (l.cod === cod) delete _mc.caja.items[l.idLinea]; });
   _mcGuardar();
@@ -4734,7 +4782,7 @@ async function mcCerrar(igual) {
   if (!items.length) { _mc.aviso = { m: '⛔ La caja está vacía', tipo: 'err' }; mpRender(); return; }
   // 25/11: si queda algo sin embalar, cartel grande. Solo cierra si el operario confirma que sigue en otra caja.
   var faltan = _mc.datos.lineas.map(function(l) { return { cod: l.cod, q: l.pendiente - _mcEnCaja(l.idLinea) }; }).filter(function(x) { return x.q > 0; });
-  if (faltan.length && !igual) {
+  if (faltan.length && !igual && !_mc.caja.intento) {
     var tot = faltan.reduce(function(s, x) { return s + x.q; }, 0);
     _mcAlerta('warn', '⚠️ FALTAN ' + tot + ' UNIDADES', faltan.map(function(x) { return '<b>' + escHtml(x.cod) + '</b>: faltan ' + x.q; }).join('<br>') +
       '<br><br>¿Lo que falta va en la Caja ' + (Number(_mc.datos.proxima) + 1) + '?',
@@ -4743,22 +4791,41 @@ async function mcCerrar(igual) {
   }
   _mc.busy = true;
   _mc.aviso = { m: 'Cerrando la caja…', tipo: '' };
+  // 26/11 (cambio 10, H7): se marca ANTES de mandar; si la respuesta se pierde, la caja queda trabada hasta re-cerrarla
+  _mc.caja.intento = true;
+  if (!_mc.caja.nroMostrado) _mc.caja.nroMostrado = _mc.datos.proxima;
+  var nroVisto = _mc.caja.nroMostrado;
+  _mcGuardar();
   mpRender();
   try {
     var r = await _prPost({ accion: 'cerrarCaja', idPedido: _mc.datos.idPedido, idCaja: _mc.caja.idCaja, items: items, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
     _mc.datos = r.datos;
     _mc.caja = _mcNueva();
     _mcGuardar();
+    // 26/11 (cambio 10, H19): el número que vale es el que grabó el sistema (con 2 operarios puede no ser el que se veía)
+    var cartel = function() {
+      _alertaGrande('ok', '📦 CAJA ' + r.nroCaja + ' CERRADA', 'Escribí en la caja el número <b style="font-size:30px;">' + r.nroCaja + '</b>' +
+        (Number(r.nroCaja) !== Number(nroVisto) ? '<br><br>⚠ OJO: en pantalla decía Caja ' + nroVisto + ', pero quedó grabada como <b>Caja ' + r.nroCaja + '</b>.' : ''),
+        [{ t: 'Listo, la numeré', f: '' }]);
+    };
     if (r.completo || !_mc.datos.lineas.some(function(l) { return l.pendiente > 0; })) {
       try { localStorage.removeItem(_mcKey()); } catch (e) {}
       _mc.datos = null; _mc.aviso = null; _mc.busy = false;
       showToast('✅ Caja ' + r.nroCaja + ' cerrada. ' + (r.completo ? 'Pedido embalado completo' : 'Tu parte está embalada'));
       await mpCargar();
+      cartel();
       return;
     }
     _mc.aviso = { m: '✅ Caja ' + r.nroCaja + ' cerrada. Seguí con la Caja ' + _mc.datos.proxima, tipo: 'ok' };
+    cartel();
   } catch (e) {
-    _mc.aviso = { m: 'No se cerró: ' + e.message + '. Lo de la caja sigue guardado en la tablet.', tipo: 'err' };
+    if (e && e.red) _mc.aviso = { m: '📶 Sin señal: no se sabe si la caja se grabó. Tocá "Cerrar caja" de nuevo sin cambiar nada.', tipo: 'err' };
+    else {
+      // error del GAS = no se grabó (salvo un corte a medias, que deja fila roja en el LOG): se puede seguir armando
+      _mc.caja.intento = false;
+      _mcGuardar();
+      _mc.aviso = { m: 'No se cerró: ' + e.message + '. Lo de la caja sigue guardado en la tablet.', tipo: 'err' };
+    }
   } finally {
     _mc.busy = false;
     if (_mc.datos) mpRender();
@@ -4863,13 +4930,21 @@ async function peAbrir(recargar) {
     return;
   }
   var loc = _peLocal();
+  // 26/11 (cambio 9, H12/H16): lo ya sacado sale solo de las previas SACADO (lo RECHAZADO por Matías se vuelve a sacar).
+  // loc.base = firma de lo que había en el sistema la última vez que la tablet se puso de acuerdo con él.
+  // Si el sistema cambió desde entonces (devuelto, reasignado, rechazado, Terminé con respuesta perdida) → gana el sistema + cartel.
+  var prevSac = (d.previas || []).filter(function(p) { return p.estado !== 'RECHAZADO'; });
+  var firmaSrv = _peFirma(prevSac);
+  var cambio = false;
+  if (loc && loc.id === d.idPedido && loc.base !== undefined && loc.base !== firmaSrv) { loc = null; cambio = true; }
   if (!loc || loc.id !== d.idPedido) {
     loc = { id: d.idPedido, tomas: {}, faltas: {}, ubi: '' };
-    d.previas.forEach(function(p) {
+    prevSac.forEach(function(p) {
       var t = loc.tomas[p.idLinea] || (loc.tomas[p.idLinea] = {});
       t[p.ubicacion] = (t[p.ubicacion] || 0) + p.cant;
     });
   }
+  loc.base = firmaSrv;
   var vivas = {};
   d.lineas.forEach(function(l) { vivas[l.idLinea] = true; });
   Object.keys(loc.tomas).forEach(function(k) { if (!vivas[k]) delete loc.tomas[k]; });
@@ -4888,7 +4963,15 @@ async function peAbrir(recargar) {
   _peVer(true);
   _peAviso('');
   peRender();
+  if (cambio) _alertaGrande('warn', '⚠️ EL PEDIDO CAMBIÓ', 'Desde la última vez cambió en el sistema (lo devolvieron, lo reasignaron o Matías rechazó algo).<br><br>' +
+    'Se cargó <b>lo que está guardado en el sistema</b>. Revisá que lo sacado coincida con la mercadería.', [{ t: 'Entendido', f: '' }]);
   setTimeout(function() { var i = document.getElementById('pe-scan'); if (i) i.focus(); }, 50);
+}
+// Firma de lo sacado: "línea|ubicación|cant" sumado por línea+ubicación, ordenado (sirve para tomas y para previas)
+function _peFirma(lista) {
+  var s = {};
+  (lista || []).forEach(function(x) { var k = x.idLinea + '|' + String(x.ubicacion || '').toUpperCase(); s[k] = (s[k] || 0) + (Number(x.cant) || 0); });
+  return Object.keys(s).filter(function(k) { return s[k] > 0; }).sort().map(function(k) { return k + '|' + s[k]; }).join(';');
 }
 function _peUbi(codigo) {
   var c = String(codigo || '').trim().toUpperCase();
@@ -5008,13 +5091,36 @@ function peQuitarSobra() {
 // 24/11 (Pedro): al confirmar cada ubicación se manda lo sacado hasta ahora (soloGuardar) en segundo plano,
 // así la ubicación baja en STOCK POR UBICACION (col E) y los de afuera lo ven. De a un envío por vez; si falla, va en el próximo o en "Terminé de sacar".
 var _peSyncVuelo = false, _peSyncOtra = false;
+// 26/11 (cambio 2, H14): antes los errores se tragaban. Sin red → aviso gris (va en el próximo envío);
+// error del GAS (disponible superado, ocupado, ya no asignado…) → cartel grande "NO SE GUARDÓ".
 function _peSync() {
   if (!_pe.datos || !_pe.loc || _pe.busy) return;
   if (_peSyncVuelo) { _peSyncOtra = true; return; }
   _peSyncVuelo = true; _peSyncOtra = false;
-  _prPost({ accion: 'registrarSacado', soloGuardar: true, idPedido: _pe.datos.idPedido, tomas: _peTomasLista(_pe.loc.tomas), faltantes: [], deMas: _peExtras().deMas, usuario: (CURRENT_USER && CURRENT_USER.name) || '' })
-    .catch(function() {})
+  var tomas = _peTomasLista(_pe.loc.tomas), idP = _pe.datos.idPedido;
+  _prPost({ accion: 'registrarSacado', soloGuardar: true, idPedido: idP, tomas: tomas, faltantes: [], deMas: _peExtras().deMas, usuario: (CURRENT_USER && CURRENT_USER.name) || '' })
+    .then(function() {
+      // cambio 9: lo guardado en el sistema ahora es esto → base para comparar al reabrir
+      if (_pe.loc && _pe.loc.id === idP) { _pe.loc.base = _peFirma(tomas); _peGuardar(); }
+      _peMsg('');
+    })
+    .catch(function(e) {
+      if (!_pe.datos || _pe.datos.idPedido !== idP) return;
+      if (e && e.red) { _peMsg('📶 Sin señal: lo sacado queda en la tablet y se manda en el próximo "Confirmar" o en "Terminé de sacar".'); return; }
+      _alertaGrande('err', '⛔ NO SE GUARDÓ', 'Lo último que sacaste <b>no se grabó</b> en el sistema:<br><br>' + escHtml((e && e.message) || 'error') +
+        '<br><br>Si no sabés qué hacer, avisá a Matías.',
+        [{ t: 'Reintentar', f: '_peSync()' }, { t: 'Actualizar pedido (trae lo del sistema)', f: 'peActualizar()' }, { t: 'Cerrar', f: '' }]);
+    })
     .then(function() { _peSyncVuelo = false; if (_peSyncOtra) _peSync(); });
+}
+// Vuelve a cargar el pedido desde el sistema y descarta lo de la tablet que no se grabó
+function peActualizar() {
+  if (_pe.busy || !_pe.datos) return;
+  if (!confirm('¿Traer el pedido como está en el sistema?\n\nLo escaneado que no se grabó se pierde: fijate que la mercadería coincida.')) return;
+  var id = _pe.datos.idPedido;
+  _peBorrarLocal();
+  _pe.idForzado = id;
+  peAbrir();
 }
 function peContinuar() {
   var p = _pe.loc && _pe.loc.paso;
@@ -5218,7 +5324,13 @@ async function peTerminar() {
     showToast(r.paraControl || r.ya ? '⏳ Listo. Esperá que Matías controle las fechas' : '✅ Listo');
     switchPanel('mis-pedidos');
   } catch (e) {
-    _peMsg('No se mandó: ' + e.message + '. Lo escaneado sigue guardado en la tablet.', true);
+    if (e && e.red) _peMsg('📶 Sin señal: no se mandó. Lo escaneado sigue guardado en la tablet; probá de nuevo en un rato.');
+    else {
+      _peMsg('No se mandó: ' + e.message + '. Lo escaneado sigue guardado en la tablet.', true);
+      // 26/11 (cambio 2, H15)
+      _alertaGrande('err', '⛔ NO SE MANDÓ', escHtml(e.message || 'error') + '<br><br>Lo escaneado sigue en la tablet. Si no sabés qué hacer, avisá a Matías.',
+        [{ t: 'Entendido', f: '' }, { t: 'Actualizar pedido (trae lo del sistema)', f: 'peActualizar()' }]);
+    }
   } finally {
     _pe.busy = false;
     if (_pe.datos) peRender();
@@ -8144,21 +8256,13 @@ async function _guardarEnHistorial(oc, escaneadoPor) {
           setTimeout(_checkAndRetryPendingFinRep, 45000);
         });
 
-        // ── PICKING BETA: escribir en ESCANEO UBICACIONES ──────────────────
-        if (CURRENT_USER && CURRENT_USER.pickingBeta && window._pickingBetaLineas && window._pickingBetaLineas.length > 0) {
-          var _filasUbi = window._pickingBetaLineas.map(function(l) {
-            return [l.cod || '—', l.desc || '—', l.categoria || '—', l.marca || '—',
-                    l.cant || 0, l.fecha || '—', l.lote || '—', l.tipoUbicacion || 'PICKING', 'ENTRADA'];
-          });
-          fetch(GAS_URL, {
-            method: 'POST', mode: 'no-cors',
-            body: JSON.stringify({ accion: 'agregarFilas', rango: 'ESCANEO UBICACIONES!A1', values: _filasUbi })
-          });
+        // 26/11 (cambio 13): se sacó la escritura vieja a ESCANEO UBICACIONES (nadie la lee; el stock por ubicación
+        // sale de REGISTRO POR UBICACION). Solo se limpia el estado del picking beta.
+        if (window._pickingBetaLineas) {
           window._pickingBetaLineas = null;
           window._pickingBetaConfirmado = false;
           window._pickingBetaOcObj = null;
         }
-        // ── FIN PICKING BETA ────────────────────────────────────────────────
       } else {
         // CONTROL NORMAL → guardar en HISTORIAL DE PALETS
         _guardarEnHistorialPalets(oc, escaneadoPor);
@@ -9723,13 +9827,23 @@ async function _cargarStockFrescoPalet(ocId) {
        // Dedupear por código antes de mapear — evita pintar dos veces el mismo
     // artículo cuando oc.lineas tiene más de una entrada para el mismo código
     // (por ejemplo, ítems agregados fuera de la O.C. con varios lotes).
+    // 26/11 (caso P114 ORIGINAL): línea agregada para escanear y todavía SIN escanear (0 controladas) de un código que YA
+    // tiene otra línea escaneada → se muestra tal cual. Antes el dedupe por código la escondía y, como Editar usa esta misma
+    // lista, al guardar podía desaparecer de la O.C. NO se toca el caso "HISTORIAL en 0" (líneas que se terminaron).
+    var _pendSinEscanear = function(linea) {
+      if ((linea.unidadesControladas || 0) > 0 || !((linea.cantUnidades || 0) > 0)) return false;
+      var cod = String(linea.cod);
+      return (oc.lineas || []).some(function(o){ return o !== linea && String(o.cod) === cod && (o.unidadesControladas || 0) > 0; });
+    };
     var _codsVistos = {};
     var lineasParaMostrar = (oc.lineas || []).filter(function(linea) {
+      if (_pendSinEscanear(linea)) return true;
       var cod = String(linea.cod);
       if (_codsVistos[cod]) return false;
       _codsVistos[cod] = true;
       return true;
     }).map(function(linea) {
+      if (_pendSinEscanear(linea)) return linea;
       var fresca = lineasFrescas.find(function(lf){ return String(lf.cod) === String(linea.cod); });
       if (!fresca) return linea;
              var lineaDisplay = Object.assign({}, linea, {
@@ -11642,9 +11756,13 @@ async function syncUsuarios() {
     var timeoutPromise = new Promise(function(_, reject){ setTimeout(function(){ reject('timeout'); }, 8000); });
     var rows = await Promise.race([sheetsRead('USUARIOS!A2:F99'), timeoutPromise]);
     if (rows && rows.length > 0) {
+      // 26/11 (cambio 13, H25): fila = fila REAL en USUARIOS (antes se usaba el índice después de filtrar
+      // las filas vacías → con una fila en blanco en el medio el latido pisaba la col E de otro usuario)
       var users = rows
-        .filter(function(r){ return r[0] && String(r[0]).trim(); })
-        .map(function(r){
+        .map(function(r, i){ return { r: r, fila: i + 2 }; })
+        .filter(function(x){ return x.r[0] && String(x.r[0]).trim(); })
+        .map(function(x){
+          var r = x.r;
           var nombre = String(r[0]).trim();
           var rolRaw = String(r[1] || '').trim().toLowerCase();
           // Pedidos (adentro): "Supervisor Pedidos" / "Operario Pedidos" en col B
@@ -11657,7 +11775,7 @@ async function syncUsuarios() {
           var filaAlerta = r[3] ? parseInt(r[3], 10) : null;
           var sesionActiva = r[4] ? String(r[4]).trim() : '';
           var pickingBeta = String(r[5] || '').trim().toUpperCase() === 'SI';
-          return { name: nombre, rol: rol, pin: pin, filaAlerta: filaAlerta, sesionActiva: sesionActiva, pickingBeta: pickingBeta };
+          return { name: nombre, rol: rol, pin: pin, filaAlerta: filaAlerta, sesionActiva: sesionActiva, pickingBeta: pickingBeta, fila: x.fila };
         });
       try { localStorage.setItem('BETA_stockcontrol_users', JSON.stringify(users)); } catch(e) {}
       return users;
@@ -11678,19 +11796,15 @@ async function _registrarSesionActiva(nombreUsuario) {
   var deviceId = _getDeviceId();
   var ts = Date.now();
   var valor = deviceId + '|' + ts;
-  var users = loadUsers();
-  var idx = users.findIndex(function(u){ return u.name === nombreUsuario; });
-  if (idx < 0) return;
-  var fila = idx + 2; // fila en el Sheet (encabezado en fila 1, datos desde fila 2)
+  var fila = _getFilaUsuario(nombreUsuario);
+  if (!fila) return;
   await sheetsWrite('USUARIOS!E' + fila, [[valor]]);
 }
 
 async function _liberarSesionActiva(nombreUsuario) {
-  var users = loadUsers();
-  var idx = users.findIndex(function(u){ return u.name === nombreUsuario; });
-  if (idx < 0) return;
-  var fila = idx + 2;
-  await sheetsWrite('USUARIOS!E' + fila, [['']]); 
+  var fila = _getFilaUsuario(nombreUsuario);
+  if (!fila) return;
+  await sheetsWrite('USUARIOS!E' + fila, [['']]);
 }
 
 async function _verificarUsuarioDisponible(nombreUsuario) {
@@ -11741,7 +11855,9 @@ function _detenerHeartbeat() {
 function _getFilaUsuario(nombreUsuario) {
   var users = loadUsers();
   var idx = users.findIndex(function(u){ return u.name === nombreUsuario; });
-  return idx >= 0 ? idx + 2 : null;
+  if (idx < 0) return null;
+  // 26/11 (H25): la fila real si vino de la planilla; si no (lista vieja guardada), como antes
+  return users[idx].fila ? users[idx].fila : idx + 2;
 }
 
 var USERS_KEY    = 'BETA_stockcontrol_users';
@@ -11978,6 +12094,13 @@ function _completarLogin(selected) {
   // Cambio de usuario en la misma tablet: liberar al anterior en USUARIOS col E
   if (CURRENT_USER && CURRENT_USER.name && CURRENT_USER.name !== selected.name) {
     _liberarSesionActiva(CURRENT_USER.name).catch(function(){});
+    // 26/11 (cambio 13, H31): lo abierto de pedidos / cajas / controles era del usuario anterior (lo local queda en SU clave)
+    _pe.datos = null; _pe.loc = null; _pe.busy = false; _pe.idForzado = ''; _pe.faltaAbierta = '';
+    _mc.datos = null; _mc.caja = null; _mc.busy = false; _mc.aviso = null; _mc.alerta = null;
+    _mp.datos = null; _mp.busy = false; _mp.devAbierto = '';
+    _pr.datos = null; _pr.detalle = null; _pr.abierto = ''; _pr.busy = false;
+    _cu.lista = null; _cu.act = null; _cu.busy = false;
+    _alertaGrandeCerrar();
   }
   CURRENT_USER = {
     name: selected.name,
@@ -13888,7 +14011,8 @@ function confirmarEscaneadoPor() {
         var estabaEscaneando = remito && remito.length > 0;
         if (!estabaEscaneando) {
           var payloadAlerta = JSON.stringify({ accion: 'setAlerta', valor: 'VACIO', fila: CURRENT_USER.filaAlerta });
-          navigator.sendBeacon(GAS_URL, new Blob([payloadAlerta], { type: 'application/json' }));
+          // 26/11 (cambio 13, H34): text/plain; con application/json Chrome no manda el beacon
+          navigator.sendBeacon(GAS_URL, new Blob([payloadAlerta], { type: 'text/plain;charset=UTF-8' }));
         }
       }
     }
