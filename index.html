@@ -4644,7 +4644,7 @@ async function mpDevolver(id) {
       var tomas = _peTomasLista(loc.tomas);
       // 17/11: deMas para que lo sacado de más también se guarde (si no, el GAS lo rechaza por pasar lo disponible)
       var _dm = Object.keys(loc.deMas || {}).filter(function(c) { return loc.deMas[c]; });
-      if (tomas.length) await _prPost({ accion: 'registrarSacado', soloGuardar: true, idPedido: id, tomas: tomas, faltantes: [], deMas: _dm, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
+      if (tomas.length) await _prPost({ accion: 'registrarSacado', dispositivo: _tabletId(), soloGuardar: true, idPedido: id, tomas: tomas, faltantes: [], deMas: _dm, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
     }
     var rd = await _prPost({ accion: 'devolverParte', idPedido: id, motivo: mot, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
     _mp.devAbierto = '';
@@ -5105,7 +5105,7 @@ function _peSync() {
   if (_peSyncVuelo) { _peSyncOtra = true; return; }
   _peSyncVuelo = true; _peSyncOtra = false;
   var tomas = _peTomasLista(_pe.loc.tomas), idP = _pe.datos.idPedido;
-  _prPost({ accion: 'registrarSacado', soloGuardar: true, idPedido: idP, tomas: tomas, faltantes: [], deMas: _peExtras().deMas, usuario: (CURRENT_USER && CURRENT_USER.name) || '' })
+  _prPost({ accion: 'registrarSacado', dispositivo: _tabletId(), soloGuardar: true, idPedido: idP, tomas: tomas, faltantes: [], deMas: _peExtras().deMas, usuario: (CURRENT_USER && CURRENT_USER.name) || '' })
     .then(function() {
       // cambio 9: lo guardado en el sistema ahora es esto → base para comparar al reabrir
       if (_pe.loc && _pe.loc.id === idP) { _pe.loc.base = _peFirma(tomas); _peGuardar(); }
@@ -5323,7 +5323,7 @@ async function peTerminar() {
   _peMsg('Mandando lo sacado…');
   try {
     var ex = _peExtras();
-    var r = await _prPost({ accion: 'registrarSacado', idPedido: d.idPedido, tomas: _peTomasLista(loc.tomas), faltantes: faltantes, deMas: ex.deMas, noHay: ex.noHay, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
+    var r = await _prPost({ accion: 'registrarSacado', dispositivo: _tabletId(), idPedido: d.idPedido, tomas: _peTomasLista(loc.tomas), faltantes: faltantes, deMas: ex.deMas, noHay: ex.noHay, usuario: (CURRENT_USER && CURRENT_USER.name) || '' });
     _peBorrarLocal();
     _pe.datos = null; _pe.loc = null;
     _peVer(false);
@@ -13620,6 +13620,15 @@ document.getElementById('modal-agregar-fuera-oc').addEventListener('click', func
 var _alertaEscaneoOcId = null;
 var _alertaEscaneoEnviadoPor = '';
 
+// 27/11 (cambio 3): id FIJO de la tablet (localStorage, sobrevive a cerrar Chrome) para que el GAS frene
+// el mismo pedido abierto en OTRA tablet. Si no hay localStorage, usa el de la pestaña.
+function _tabletId() {
+  try {
+    var t = localStorage.getItem('sc_tablet_id');
+    if (!t) { t = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7); localStorage.setItem('sc_tablet_id', t); }
+    return t;
+  } catch (e) { return _getDeviceId(); }
+}
 function _getDeviceId() {
   var k = 'sc_device_id';
   // sessionStorage: ID único por pestaña/sesión — permite probar con dos pestañas en la misma PC
