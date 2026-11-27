@@ -1409,6 +1409,7 @@
           <div class="page-sub">Historial de todas las O.C. cargadas — seleccioná una para enviarla al escaneo</div>
         </div>
         <div class="btn-row">
+          <button class="btn" onclick="_actualizarReporteOC(this)"><i class="ti ti-refresh"></i> Actualizar</button>
           <button class="btn" onclick="abrirModalClasificar(null)"><i class="ti ti-plus"></i> Nueva O.C. manual</button>
           <button class="btn" onclick="abrirModalClasificarConArchivo()"><i class="ti ti-upload"></i> Importar desde Excel</button>
           <button class="btn" onclick="exportarTodasOC()"><i class="ti ti-file-spreadsheet"></i> Exportar todo</button>
@@ -2790,8 +2791,14 @@ function updateClock() {
 }
 if (!window._clockInterval) { window._clockInterval = setInterval(updateClock, 1000); }
 updateClock();
-if (!window._syncOrdenesInterval) { window._syncOrdenesInterval =
-setInterval(function(){ if (!document.hidden && !(CURRENT_USER && (CURRENT_USER.rol === 'operario' || _esRolPedidos(CURRENT_USER.rol)))) syncOrdenes(); }, 300000); } // cada 5 min, NO para operarios (leen ORDENES al tocar Revisar alertas)
+// 27/11 (Pedro): sacado el syncOrdenes automático cada 5 min (ahorra ~12 ejecuciones/h por PC).
+// ORDENES se lee al entrar a Reporte de O.C. (switchPanel) y con el botón "Actualizar".
+async function _actualizarReporteOC(btn) {
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-refresh"></i> Actualizando...'; }
+  try { await syncOrdenes(); } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-refresh"></i> Actualizar'; }
+  }
+}
 if (!window._conexionInterval) { window._conexionInterval = setInterval(function()
 { _actualizarIndicadorConexion(navigator.onLine); }, 5000); }
 // Polling de alertas INDEPENDIENTE del syncOrdenes — antes dependía de que
